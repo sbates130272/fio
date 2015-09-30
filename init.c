@@ -69,6 +69,8 @@ long long trigger_timeout = 0;
 char *trigger_cmd = NULL;
 char *trigger_remote_cmd = NULL;
 
+char *aux_path = NULL;
+
 static int prev_group_jobs;
 
 unsigned long fio_debug = 0;
@@ -267,6 +269,11 @@ static struct option l_opts[FIO_NR_OPTIONS] = {
 		.val		= 'J',
 	},
 	{
+		.name		= (char *) "aux-path",
+		.has_arg	= required_argument,
+		.val		= 'K',
+	},
+	{
 		.name		= NULL,
 	},
 };
@@ -458,14 +465,15 @@ static int __setup_rate(struct thread_data *td, enum fio_ddir ddir)
 	if (td->o.rate[ddir])
 		td->rate_bps[ddir] = td->o.rate[ddir];
 	else
-		td->rate_bps[ddir] = td->o.rate_iops[ddir] * bs;
+		td->rate_bps[ddir] = (uint64_t) td->o.rate_iops[ddir] * bs;
 
 	if (!td->rate_bps[ddir]) {
 		log_err("rate lower than supported\n");
 		return -1;
 	}
 
-	td->rate_pending_usleep[ddir] = 0;
+	td->rate_next_io_time[ddir] = 0;
+	td->rate_io_issue_bytes[ddir] = 0;
 	return 0;
 }
 
@@ -635,12 +643,12 @@ static int fixup_options(struct thread_data *td)
 		log_err("fio: rate and rate_iops are mutually exclusive\n");
 		ret = 1;
 	}
-	if ((o->rate[DDIR_READ] < o->ratemin[DDIR_READ]) ||
-	    (o->rate[DDIR_WRITE] < o->ratemin[DDIR_WRITE]) ||
-	    (o->rate[DDIR_TRIM] < o->ratemin[DDIR_TRIM]) ||
-	    (o->rate_iops[DDIR_READ] < o->rate_iops_min[DDIR_READ]) ||
-	    (o->rate_iops[DDIR_WRITE] < o->rate_iops_min[DDIR_WRITE]) ||
-	    (o->rate_iops[DDIR_TRIM] < o->rate_iops_min[DDIR_TRIM])) {
+	if ((o->rate[DDIR_READ] && (o->rate[DDIR_READ] < o->ratemin[DDIR_READ])) ||
+	    (o->rate[DDIR_WRITE] && (o->rate[DDIR_WRITE] < o->ratemin[DDIR_WRITE])) ||
+	    (o->rate[DDIR_TRIM] && (o->rate[DDIR_TRIM] < o->ratemin[DDIR_TRIM])) ||
+	    (o->rate_iops[DDIR_READ] && (o->rate_iops[DDIR_READ] < o->rate_iops_min[DDIR_READ])) ||
+	    (o->rate_iops[DDIR_WRITE] && (o->rate_iops[DDIR_WRITE] < o->rate_iops_min[DDIR_WRITE])) ||
+	    (o->rate_iops[DDIR_TRIM] && (o->rate_iops[DDIR_TRIM] < o->rate_iops_min[DDIR_TRIM]))) {
 		log_err("fio: minimum rate exceeds rate\n");
 		ret = 1;
 	}
@@ -662,7 +670,9 @@ static int fixup_options(struct thread_data *td)
 			ret = warnings_fatal;
 		}
 
-		o->refill_buffers = 1;
+		if (!fio_option_is_set(o, refill_buffers))
+			o->refill_buffers = 1;
+
 		if (o->max_bs[DDIR_WRITE] != o->min_bs[DDIR_WRITE] &&
 		    !o->verify_interval)
 			o->verify_interval = o->min_bs[DDIR_WRITE];
@@ -1790,6 +1800,7 @@ static void usage(const char *name)
 	printf("  --trigger-timeout=t\tExecute trigger af this time\n");
 	printf("  --trigger=cmd\t\tSet this command as local trigger\n");
 	printf("  --trigger-remote=cmd\tSet this command as remote trigger\n");
+	printf("  --aux-path=path\tUse this path for fio state generated files\n");
 	printf("\nFio was written by Jens Axboe <jens.axboe@oracle.com>");
 	printf("\n                   Jens Axboe <jaxboe@fusionio.com>");
 	printf("\n                   Jens Axboe <axboe@fb.com>\n");
@@ -1987,7 +1998,7 @@ static void show_closest_option(const char *name)
 		i++;
 	}
 
-	if (best_option != -1)
+	if (best_option != -1 && string_distance_ok(name, best_distance))
 		log_err("Did you mean %s?\n", l_opts[best_option].name);
 }
 
@@ -2379,6 +2390,11 @@ int parse_cmd_line(int argc, char *argv[], int client_type)
 			if (trigger_remote_cmd)
 				free(trigger_remote_cmd);
 			trigger_remote_cmd = strdup(optarg);
+			break;
+		case 'K':
+			if (aux_path)
+				free(aux_path);
+			aux_path = strdup(optarg);
 			break;
 		case 'B':
 			if (check_str_time(optarg, &trigger_timeout, 1)) {

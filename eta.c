@@ -123,6 +123,11 @@ void eta_to_str(char *str, unsigned long eta_sec)
 	unsigned int d, h, m, s;
 	int disp_hour = 0;
 
+	if (eta_sec == -1) {
+		sprintf(str, "--");
+		return;
+	}
+
 	s = eta_sec % 60;
 	eta_sec /= 60;
 	m = eta_sec % 60;
@@ -146,7 +151,7 @@ void eta_to_str(char *str, unsigned long eta_sec)
 /*
  * Best effort calculation of the estimated pending runtime of a job.
  */
-static int thread_eta(struct thread_data *td)
+static unsigned long thread_eta(struct thread_data *td)
 {
 	unsigned long long bytes_total, bytes_done;
 	unsigned long eta_sec = 0;
@@ -157,6 +162,9 @@ static int thread_eta(struct thread_data *td)
 	timeout = td->o.timeout / 1000000UL;
 
 	bytes_total = td->total_io_size;
+
+	if (td->flags & TD_F_NO_PROGRESS)
+		return -1;
 
 	if (td->o.fill_device && td->o.size  == -1ULL) {
 		if (!td->fill_device_size || td->fill_device_size == -1ULL)
@@ -282,14 +290,19 @@ static void calc_rate(int unified_rw_rep, unsigned long mtime,
 	int i;
 
 	for (i = 0; i < DDIR_RWDIR_CNT; i++) {
-		unsigned long long diff;
+		unsigned long long diff, this_rate;
 
 		diff = io_bytes[i] - prev_io_bytes[i];
+		if (mtime)
+			this_rate = ((1000 * diff) / mtime) / 1024;
+		else
+			this_rate = 0;
+
 		if (unified_rw_rep) {
 			rate[i] = 0;
-			rate[0] += ((1000 * diff) / mtime) / 1024;
+			rate[0] += this_rate;
 		} else
-			rate[i] = ((1000 * diff) / mtime) / 1024;
+			rate[i] = this_rate;
 
 		prev_io_bytes[i] = io_bytes[i];
 	}
@@ -302,14 +315,19 @@ static void calc_iops(int unified_rw_rep, unsigned long mtime,
 	int i;
 
 	for (i = 0; i < DDIR_RWDIR_CNT; i++) {
-		unsigned long long diff;
+		unsigned long long diff, this_iops;
 
 		diff = io_iops[i] - prev_io_iops[i];
+		if (mtime)
+			this_iops = (diff * 1000) / mtime;
+		else
+			this_iops = 0;
+
 		if (unified_rw_rep) {
 			iops[i] = 0;
-			iops[0] += (diff * 1000) / mtime;
+			iops[0] += this_iops;
 		} else
-			iops[i] = (diff * 1000) / mtime;
+			iops[i] = this_iops;
 
 		prev_io_iops[i] = io_iops[i];
 	}
@@ -513,7 +531,8 @@ void display_thread_status(struct jobs_eta *je)
 		int l;
 		int ddir;
 
-		if ((!je->eta_sec && !eta_good) || je->nr_ramp == je->nr_running)
+		if ((!je->eta_sec && !eta_good) || je->nr_ramp == je->nr_running ||
+		    je->eta_sec == -1)
 			strcpy(perc_str, "-.-% done");
 		else {
 			double mult = 100.0;
@@ -571,7 +590,7 @@ struct jobs_eta *get_jobs_eta(int force, size_t *size)
 	if (!thread_number)
 		return NULL;
 
-	*size = sizeof(*je) + THREAD_RUNSTR_SZ;
+	*size = sizeof(*je) + THREAD_RUNSTR_SZ + 1;
 	je = malloc(*size);
 	if (!je)
 		return NULL;

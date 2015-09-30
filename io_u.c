@@ -568,48 +568,46 @@ void io_u_quiesce(struct thread_data *td)
 static enum fio_ddir rate_ddir(struct thread_data *td, enum fio_ddir ddir)
 {
 	enum fio_ddir odir = ddir ^ 1;
-	long usec;
+	long usec, now;
 
 	assert(ddir_rw(ddir));
+	now = utime_since_now(&td->start);
 
-	if (td->rate_pending_usleep[ddir] <= 0)
+	/*
+	 * if rate_next_io_time is in the past, need to catch up to rate
+	 */
+	if (td->rate_next_io_time[ddir] <= now)
 		return ddir;
 
 	/*
-	 * We have too much pending sleep in this direction. See if we
+	 * We are ahead of rate in this direction. See if we
 	 * should switch.
 	 */
 	if (td_rw(td) && td->o.rwmix[odir]) {
 		/*
-		 * Other direction does not have too much pending, switch
+		 * Other direction is behind rate, switch
 		 */
-		if (td->rate_pending_usleep[odir] < 100000)
+		if (td->rate_next_io_time[odir] <= now)
 			return odir;
 
 		/*
-		 * Both directions have pending sleep. Sleep the minimum time
-		 * and deduct from both.
+		 * Both directions are ahead of rate. sleep the min
+		 * switch if necissary
 		 */
-		if (td->rate_pending_usleep[ddir] <=
-			td->rate_pending_usleep[odir]) {
-			usec = td->rate_pending_usleep[ddir];
+		if (td->rate_next_io_time[ddir] <=
+			td->rate_next_io_time[odir]) {
+			usec = td->rate_next_io_time[ddir] - now;
 		} else {
-			usec = td->rate_pending_usleep[odir];
+			usec = td->rate_next_io_time[odir] - now;
 			ddir = odir;
 		}
 	} else
-		usec = td->rate_pending_usleep[ddir];
+		usec = td->rate_next_io_time[ddir] - now;
 
 	if (td->o.io_submit_mode == IO_MODE_INLINE)
 		io_u_quiesce(td);
 
 	usec = usec_sleep(td, usec);
-
-	td->rate_pending_usleep[ddir] -= usec;
-
-	odir = ddir ^ 1;
-	if (td_rw(td) && __should_check_rate(td, odir))
-		td->rate_pending_usleep[odir] -= usec;
 
 	return ddir;
 }
@@ -1580,6 +1578,13 @@ static void __io_u_log_error(struct thread_data *td, struct io_u *io_u)
 		io_ddir_name(io_u->ddir),
 		io_u->offset, io_u->xfer_buflen);
 
+	if (td->io_ops->errdetails) {
+		char *err = td->io_ops->errdetails(io_u);
+
+		log_err("fio: %s\n", err);
+		free(err);
+	}
+
 	if (!td->error)
 		td_verror(td, io_u->error, "io_u error");
 }
@@ -1603,6 +1608,9 @@ static void account_io_completion(struct thread_data *td, struct io_u *io_u,
 {
 	const int no_reduce = !gtod_reduce(td);
 	unsigned long lusec = 0;
+
+	if (td->parent)
+		td = td->parent;
 
 	if (no_reduce)
 		lusec = utime_since(&io_u->issue_time, &icd->time);
@@ -1633,9 +1641,6 @@ static void account_io_completion(struct thread_data *td, struct io_u *io_u,
 		io_u_mark_latency(td, lusec);
 	}
 
-	if (td->parent)
-		td = td->parent;
-
 	if (!td->o.disable_bw)
 		add_bw_sample(td, idx, bytes, &icd->time);
 
@@ -1654,18 +1659,6 @@ static void account_io_completion(struct thread_data *td, struct io_u *io_u,
 			}
 		}
 	}
-}
-
-static long long usec_for_io(struct thread_data *td, enum fio_ddir ddir)
-{
-	uint64_t secs, remainder, bps, bytes;
-
-	assert(!(td->flags & TD_F_CHILD));
-	bytes = td->this_io_bytes[ddir];
-	bps = td->rate_bps[ddir];
-	secs = bytes / bps;
-	remainder = bytes % bps;
-	return remainder * 1000000 / bps + secs * 1000000;
 }
 
 static void io_completed(struct thread_data *td, struct io_u **io_u_ptr,
@@ -1709,7 +1702,6 @@ static void io_completed(struct thread_data *td, struct io_u **io_u_ptr,
 
 	if (!io_u->error && ddir_rw(ddir)) {
 		unsigned int bytes = io_u->buflen - io_u->resid;
-		const enum fio_ddir oddir = ddir ^ 1;
 		int ret;
 
 		td->io_blocks[ddir]++;
@@ -1738,26 +1730,8 @@ static void io_completed(struct thread_data *td, struct io_u **io_u_ptr,
 		}
 
 		if (ramp_time_over(td) && (td->runstate == TD_RUNNING ||
-					   td->runstate == TD_VERIFYING)) {
-			struct thread_data *__td = td;
-
+					   td->runstate == TD_VERIFYING))
 			account_io_completion(td, io_u, icd, ddir, bytes);
-
-			if (td->parent)
-				__td = td->parent;
-
-			if (__should_check_rate(__td, ddir)) {
-				__td->rate_pending_usleep[ddir] =
-					(usec_for_io(__td, ddir) -
-					 utime_since_now(&__td->start));
-			}
-			if (ddir != DDIR_TRIM &&
-			    __should_check_rate(__td, oddir)) {
-				__td->rate_pending_usleep[oddir] =
-					(usec_for_io(__td, oddir) -
-					 utime_since_now(&__td->start));
-			}
-		}
 
 		icd->bytes_done[ddir] += bytes;
 
@@ -1891,6 +1865,10 @@ void io_u_queued(struct thread_data *td, struct io_u *io_u)
 		unsigned long slat_time;
 
 		slat_time = utime_since(&io_u->start_time, &io_u->issue_time);
+
+		if (td->parent)
+			td = td->parent;
+
 		add_slat_sample(td, io_u->ddir, slat_time, io_u->xfer_buflen,
 				io_u->offset);
 	}

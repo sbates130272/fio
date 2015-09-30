@@ -168,7 +168,9 @@ for opt do
   ;;
   --enable-libhdfs) libhdfs="yes"
   ;;
-  --disable-shm) output_sym "CONFIG_NO_SHM"
+  --disable-shm) no_shm="yes"
+  ;;
+  --disable-optimizations) disable_opt="yes"
   ;;
   --help)
     show_help="yes"
@@ -193,6 +195,7 @@ if test "$show_help" = "yes" ; then
   echo "--disable-gfapi        Disable gfapi"
   echo "--enable-libhdfs       Enable hdfs support"
   echo "--disable-shm          Disable SHM support"
+  echo "--disable-optimizations Don't enable compiler optimizations"
   exit $exit_val
 fi
 
@@ -219,6 +222,14 @@ printf "# Configured with:" >> $config_host_mak
 printf " '%s'" "$0" "$@" >> $config_host_mak
 echo >> $config_host_mak
 echo "CONFIG_TARGET_OS=$targetos" >> $config_host_mak
+
+if test "$no_shm" = "yes" ; then
+  output_sym "CONFIG_NO_SHM"
+fi
+
+if test "$disable_opt" = "yes" ; then
+  output_sym "CONFIG_FIO_NO_OPT"
+fi
 
 # Some host OSes need non-standard checks for which CPU to use.
 # Note that these checks are broken for cross-compilation: if you're
@@ -547,17 +558,18 @@ fi
 echo "Solaris AIO support           $solaris_aio"
 
 ##########################################
-# __sync_fetch_and_and test
+# __sync_fetch_and_add test
 sfaa="no"
 cat > $TMPC << EOF
-static int sfaa(int *ptr)
+#include <inttypes.h>
+static int sfaa(uint64_t *ptr)
 {
   return __sync_fetch_and_add(ptr, 0);
 }
 
 int main(int argc, char **argv)
 {
-  int val = 42;
+  uint64_t val = 42;
   sfaa(&val);
   return val;
 }
@@ -927,7 +939,8 @@ cat > $TMPC << EOF
 #include <string.h>
 int main(int argc, char **argv)
 {
-  strsep(NULL, NULL);
+  static char *string = "This is a string";
+  strsep(&string, "needle");
   return 0;
 }
 EOF
@@ -950,6 +963,25 @@ if compile_prog "" "" "strcasestr"; then
   strcasestr="yes"
 fi
 echo "strcasestr                    $strcasestr"
+
+##########################################
+# strlcat() probe
+strlcat="no"
+cat > $TMPC << EOF
+#include <string.h>
+int main(int argc, char **argv)
+{
+  static char dst[64];
+  static char *string = "This is a string";
+  memset(dst, 0, sizeof(dst));
+  strlcat(dst, string, sizeof(dst));
+  return 0;
+}
+EOF
+if compile_prog "" "" "strlcat"; then
+  strlcat="yes"
+fi
+echo "strlcat                       $strlcat"
 
 ##########################################
 # getopt_long_only() probe
@@ -1397,11 +1429,14 @@ echo "HDFS engine                   $libhdfs"
 # Check whether we have MTD
 mtd="no"
 cat > $TMPC << EOF
+#include <string.h>
 #include <mtd/mtd-user.h>
 #include <sys/ioctl.h>
 int main(int argc, char **argv)
 {
+  struct mtd_write_req ops;
   struct mtd_info_user info;
+  memset(&ops, 0, sizeof(ops));
   info.type = MTD_MLCNANDFLASH;
   return ioctl(0, MEMGETINFO, &info);
 }
@@ -1465,7 +1500,7 @@ int main(int argc, char **argv)
 {
   FILE *mtab = setmntent(NULL, "r");
   struct mntent *mnt = getmntent(mtab);
-  endmntent(mnt);
+  endmntent(mtab);
   return 0;
 }
 EOF
@@ -1492,6 +1527,37 @@ if compile_prog "" "" "getmntinfo"; then
 fi
 echo "getmntinfo                    $getmntinfo"
 
+##########################################
+# Check whether we have _Static_assert
+static_assert="no"
+cat > $TMPC << EOF
+#include <assert.h>
+#include <stdlib.h>
+#undef offsetof
+#ifdef __compiler_offsetof
+#define offsetof(TYPE,MEMBER) __compiler_offsetof(TYPE,MEMBER)
+#else
+#define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
+#endif
+
+#define container_of(ptr, type, member) ({			\
+	const typeof( ((type *)0)->member ) *__mptr = (ptr);	\
+	(type *)( (char *)__mptr - offsetof(type,member) );})
+
+struct foo {
+  int a, b;
+};
+
+int main(int argc, char **argv)
+{
+  _Static_assert(offsetof(struct foo, a) == 0 , "Check");
+  return 0 ;
+}
+EOF
+if compile_prog "" "" "static_assert"; then
+    static_assert="yes"
+fi
+echo "Static Assert                 $static_assert"
 #############################################################################
 
 if test "$wordsize" = "64" ; then
@@ -1564,6 +1630,9 @@ if test "$strsep" = "yes" ; then
 fi
 if test "$strcasestr" = "yes" ; then
   output_sym "CONFIG_STRCASESTR"
+fi
+if test "$strlcat" = "yes" ; then
+  output_sym "CONFIG_STRLCAT"
 fi
 if test "$getopt_long_only" = "yes" ; then
   output_sym "CONFIG_GETOPT_LONG_ONLY"
@@ -1671,6 +1740,9 @@ fi
 if test "$getmntinfo" = "yes" ; then
   output_sym "CONFIG_GETMNTINFO"
 fi
+if test "$static_assert" = "yes" ; then
+  output_sym "CONFIG_STATIC_ASSERT"
+fi
 
 if test "$zlib" = "no" ; then
   echo "Consider installing zlib-dev (zlib-devel), some fio features depend on it."
@@ -1683,3 +1755,10 @@ echo "LDFLAGS+=$LDFLAGS" >> $config_host_mak
 echo "CC=$cc" >> $config_host_mak
 echo "BUILD_CFLAGS=$BUILD_CFLAGS $CFLAGS" >> $config_host_mak
 echo "INSTALL_PREFIX=$prefix" >> $config_host_mak
+
+if [ `dirname $0` != "." -a ! -e Makefile ]; then
+    cat > Makefile <<EOF
+SRCDIR:=`dirname $0`
+include \$(SRCDIR)/Makefile
+EOF
+fi

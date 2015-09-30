@@ -1062,16 +1062,25 @@ static struct json_object *show_thread_status_json(struct thread_stat *ts,
 				    struct group_run_stats *rs)
 {
 	struct json_object *root, *tmp;
+	struct jobs_eta *je;
 	double io_u_dist[FIO_IO_U_MAP_NR];
 	double io_u_lat_u[FIO_IO_U_LAT_U_NR];
 	double io_u_lat_m[FIO_IO_U_LAT_M_NR];
 	double usr_cpu, sys_cpu;
 	int i;
+	size_t size;
+
 
 	root = json_create_object();
 	json_object_add_value_string(root, "jobname", ts->name);
 	json_object_add_value_int(root, "groupid", ts->groupid);
 	json_object_add_value_int(root, "error", ts->error);
+
+	/* ETA Info */
+	je = get_jobs_eta(1, &size);
+	json_object_add_value_int(root, "eta", je->eta_sec);
+	json_object_add_value_int(root, "elapsed", je->elapsed_sec);
+
 
 	add_ddir_status_json(ts, rs, DDIR_READ, root);
 	add_ddir_status_json(ts, rs, DDIR_WRITE, root);
@@ -1962,6 +1971,8 @@ void add_clat_sample(struct thread_data *td, enum fio_ddir ddir,
 	if (!ddir_rw(ddir))
 		return;
 
+	td_io_u_lock(td);
+
 	add_stat_sample(&ts->clat_stat[ddir], usec);
 
 	if (td->clat_log)
@@ -1969,6 +1980,8 @@ void add_clat_sample(struct thread_data *td, enum fio_ddir ddir,
 
 	if (ts->clat_percentiles)
 		add_clat_percentile_sample(ts, usec, ddir);
+
+	td_io_u_unlock(td);
 }
 
 void add_slat_sample(struct thread_data *td, enum fio_ddir ddir,
@@ -1979,10 +1992,14 @@ void add_slat_sample(struct thread_data *td, enum fio_ddir ddir,
 	if (!ddir_rw(ddir))
 		return;
 
+	td_io_u_lock(td);
+
 	add_stat_sample(&ts->slat_stat[ddir], usec);
 
 	if (td->slat_log)
 		add_log_sample(td, td->slat_log, usec, ddir, bs, offset);
+
+	td_io_u_unlock(td);
 }
 
 void add_lat_sample(struct thread_data *td, enum fio_ddir ddir,
@@ -1993,10 +2010,14 @@ void add_lat_sample(struct thread_data *td, enum fio_ddir ddir,
 	if (!ddir_rw(ddir))
 		return;
 
+	td_io_u_lock(td);
+
 	add_stat_sample(&ts->lat_stat[ddir], usec);
 
 	if (td->lat_log)
 		add_log_sample(td, td->lat_log, usec, ddir, bs, offset);
+
+	td_io_u_unlock(td);
 }
 
 void add_bw_sample(struct thread_data *td, enum fio_ddir ddir, unsigned int bs,

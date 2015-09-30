@@ -179,7 +179,7 @@ static int __check_min_rate(struct thread_data *td, struct timeval *now,
 		if (spent < td->o.ratecycle)
 			return 0;
 
-		if (td->o.rate[ddir]) {
+		if (td->o.rate[ddir] || td->o.ratemin[ddir]) {
 			/*
 			 * check bandwidth specified rate
 			 */
@@ -220,6 +220,7 @@ static int __check_min_rate(struct thread_data *td, struct timeval *now,
 					log_err("%s: min iops rate %u not met,"
 						" got %lu\n", td->o.name,
 							rate_iops_min, rate);
+					return 1;
 				}
 			}
 		}
@@ -539,7 +540,7 @@ sync_done:
 			*ret = ret2;
 		break;
 	default:
-		assert(ret < 0);
+		assert(*ret < 0);
 		td_verror(td, -(*ret), "td_io_queue");
 		break;
 	}
@@ -763,6 +764,25 @@ static int io_complete_bytes_exceeded(struct thread_data *td)
 }
 
 /*
+ * used to calculate the next io time for rate control
+ *
+ */
+static long long usec_for_io(struct thread_data *td, enum fio_ddir ddir)
+{
+	uint64_t secs, remainder, bps, bytes;
+
+	assert(!(td->flags & TD_F_CHILD));
+	bytes = td->rate_io_issue_bytes[ddir];
+	bps = td->rate_bps[ddir];
+	if (bps) {
+		secs = bytes / bps;
+		remainder = bytes % bps;
+		return remainder * 1000000 / bps + secs * 1000000;
+	} else
+		return 0;
+}
+
+/*
  * Main IO worker function. It retrieves io_u's to process and queues
  * and reaps them, checking for rate and errors along the way.
  *
@@ -891,10 +911,17 @@ static uint64_t do_io(struct thread_data *td)
 			if (td->error)
 				break;
 			ret = workqueue_enqueue(&td->io_wq, io_u);
+
+			if (should_check_rate(td))
+				td->rate_next_io_time[ddir] = usec_for_io(td, ddir);
+
 		} else {
 			ret = td_io_queue(td, io_u);
 
-			if (io_queue_event(td, io_u, &ret, ddir, &bytes_issued, 1, &comp_time))
+			if (should_check_rate(td))
+				td->rate_next_io_time[ddir] = usec_for_io(td, ddir);
+
+			if (io_queue_event(td, io_u, &ret, ddir, &bytes_issued, 0, &comp_time))
 				break;
 
 			/*
@@ -1611,16 +1638,8 @@ static void *thread_main(void *data)
 	td->ts.io_bytes[DDIR_TRIM] = td->io_bytes[DDIR_TRIM];
 
 	if (td->o.verify_state_save && !(td->flags & TD_F_VSTATE_SAVED) &&
-	    (td->o.verify != VERIFY_NONE && td_write(td))) {
-		struct all_io_list *state;
-		size_t sz;
-
-		state = get_all_io_list(td->thread_number, &sz);
-		if (state) {
-			__verify_save_state(state, "local");
-			free(state);
-		}
-	}
+	    (td->o.verify != VERIFY_NONE && td_write(td)))
+		verify_save_state(td->thread_number);
 
 	fio_unpin_memory(td);
 
@@ -1870,7 +1889,7 @@ void check_trigger_file(void)
 		if (nr_clients)
 			fio_clients_send_trigger(trigger_remote_cmd);
 		else {
-			verify_save_state();
+			verify_save_state(IO_LIST_ALL);
 			fio_terminate_threads(TERMINATE_ALL);
 			exec_trigger(trigger_cmd);
 		}

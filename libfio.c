@@ -89,6 +89,8 @@ static void reset_io_counters(struct thread_data *td)
 		td->rate_bytes[ddir] = 0;
 		td->rate_blocks[ddir] = 0;
 		td->bytes_done[ddir] = 0;
+		td->rate_io_issue_bytes[ddir] = 0;
+		td->rate_next_io_time[ddir] = 0;
 	}
 	td->zone_bytes = 0;
 
@@ -116,9 +118,10 @@ void clear_io_state(struct thread_data *td)
 	}
 
 	/*
-	 * Set the same seed to get repeatable runs
+	 * Re-Seed random number generator if rand_repeatable is true
 	 */
-	td_fill_rand_seeds(td);
+	if (td->o.rand_repeatable)
+		td_fill_rand_seeds(td);
 }
 
 void reset_all_stats(struct thread_data *td)
@@ -168,13 +171,38 @@ const char *fio_get_arch_string(int nr)
 	return NULL;
 }
 
+static const char *td_runstates[] = {
+	"NOT_CREATED",
+	"CREATED",
+	"INITIALIZED",
+	"RAMP",
+	"SETTING_UP",
+	"RUNNING",
+	"PRE_READING",
+	"VERIFYING",
+	"FSYNCING",
+	"FINISHING",
+	"EXITED",
+	"REAPED",
+};
+
+static const char *runstate_to_name(int runstate)
+{
+	compiletime_assert(TD_LAST == 12, "td runstate list");
+	if (runstate >= 0 && runstate < TD_LAST)
+		return td_runstates[runstate];
+
+	return "invalid";
+}
+
 void td_set_runstate(struct thread_data *td, int runstate)
 {
 	if (td->runstate == runstate)
 		return;
 
-	dprint(FD_PROCESS, "pid=%d: runstate %d -> %d\n", (int) td->pid,
-						td->runstate, runstate);
+	dprint(FD_PROCESS, "pid=%d: runstate %s -> %s\n", (int) td->pid,
+						runstate_to_name(td->runstate),
+						runstate_to_name(runstate));
 	td->runstate = runstate;
 }
 

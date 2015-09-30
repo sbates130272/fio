@@ -65,19 +65,20 @@ enum {
 };
 
 enum {
-	TD_F_VER_BACKLOG	= 1,
-	TD_F_TRIM_BACKLOG	= 2,
-	TD_F_READ_IOLOG		= 4,
-	TD_F_REFILL_BUFFERS	= 8,
-	TD_F_SCRAMBLE_BUFFERS	= 16,
-	TD_F_VER_NONE		= 32,
-	TD_F_PROFILE_OPS	= 64,
-	TD_F_COMPRESS		= 128,
-	TD_F_NOIO		= 256,
-	TD_F_COMPRESS_LOG	= 512,
-	TD_F_VSTATE_SAVED	= 1024,
-	TD_F_NEED_LOCK		= 2048,
-	TD_F_CHILD		= 4096,
+	TD_F_VER_BACKLOG	= 1U << 0,
+	TD_F_TRIM_BACKLOG	= 1U << 1,
+	TD_F_READ_IOLOG		= 1U << 2,
+	TD_F_REFILL_BUFFERS	= 1U << 3,
+	TD_F_SCRAMBLE_BUFFERS	= 1U << 4,
+	TD_F_VER_NONE		= 1U << 5,
+	TD_F_PROFILE_OPS	= 1U << 6,
+	TD_F_COMPRESS		= 1U << 7,
+	TD_F_NOIO		= 1U << 8,
+	TD_F_COMPRESS_LOG	= 1U << 9,
+	TD_F_VSTATE_SAVED	= 1U << 10,
+	TD_F_NEED_LOCK		= 1U << 11,
+	TD_F_CHILD		= 1U << 12,
+	TD_F_NO_PROGRESS        = 1U << 13,
 };
 
 enum {
@@ -237,9 +238,10 @@ struct thread_data {
 	 * Rate state
 	 */
 	uint64_t rate_bps[DDIR_RWDIR_CNT];
-	long rate_pending_usleep[DDIR_RWDIR_CNT];
+	unsigned long rate_next_io_time[DDIR_RWDIR_CNT];
 	unsigned long rate_bytes[DDIR_RWDIR_CNT];
 	unsigned long rate_blocks[DDIR_RWDIR_CNT];
+	unsigned long rate_io_issue_bytes[DDIR_RWDIR_CNT];
 	struct timeval lastrate[DDIR_RWDIR_CNT];
 
 	/*
@@ -432,6 +434,7 @@ extern char *trigger_file;
 extern char *trigger_cmd;
 extern char *trigger_remote_cmd;
 extern long long trigger_timeout;
+extern char *aux_path;
 
 extern struct thread_data *threads;
 
@@ -516,6 +519,7 @@ enum {
 	TD_FINISHING,
 	TD_EXITED,
 	TD_REAPED,
+	TD_LAST,
 };
 
 extern void td_set_runstate(struct thread_data *, int);
@@ -664,7 +668,8 @@ extern const char *fio_get_arch_string(int);
 extern const char *fio_get_os_string(int);
 
 #ifdef FIO_INTERNAL
-#define ARRAY_SIZE(x) (sizeof((x)) / (sizeof((x)[0])))
+#define ARRAY_SIZE(x)    (sizeof((x)) / (sizeof((x)[0])))
+#define FIELD_SIZE(s, f) (sizeof(((typeof(s))0)->f))
 #endif
 
 enum {

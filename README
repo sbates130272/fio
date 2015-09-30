@@ -26,9 +26,9 @@ Snapshots can download from:
 
 	http://brick.kernel.dk/snaps/
 
-There are also two official mirrors. Both of these are synced within
-an hour of commits landing at git.kernel.dk. So if the main repo is
-down for some reason, either one of those is safe to use:
+There are also two official mirrors. Both of these are automatically synced
+with the main repository, when changes are pushed. If the main repo is down
+for some reason, either one of these is safe to use as a backup:
 
 	git://git.kernel.org/pub/scm/linux/kernel/git/axboe/fio.git
 	https://git.kernel.org/pub/scm/linux/kernel/git/axboe/fio.git
@@ -179,6 +179,11 @@ $ fio
 				(option=system,percpu) or run unit work
 				calibration only (option=calibrate).
 	--inflate-log=log	Inflate and output compressed log
+	--trigger-file=file	Execute trigger cmd when file exists
+	--trigger-timeout=t	Execute trigger af this time
+	--trigger=cmd		Set this command as local trigger
+	--trigger-remote=cmd	Set this command as remote trigger
+	--aux-path=path		Use this path for fio state generated files
 
 
 Any parameters following the options will be assumed to be job files,
@@ -345,9 +350,10 @@ Platforms
 ---------
 
 Fio works on (at least) Linux, Solaris, AIX, HP-UX, OSX, NetBSD, OpenBSD,
-Windows and FreeBSD.  Some features and/or options may only be available on
-some of the platforms, typically because those features only apply to that
-platform (like the solarisaio engine, or the splice engine on Linux).
+Windows, FreeBSD, and DragonFly. Some features and/or options may only be
+available on some of the platforms, typically because those features only
+apply to that platform (like the solarisaio engine, or the splice engine on
+Linux).
 
 Some features are not available on FreeBSD/Solaris even if they could be
 implemented, I'd be happy to take patches for that. An example of that is

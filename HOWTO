@@ -198,7 +198,7 @@ sections.
 -------------------------
 
 fio also supports environment variable expansion in job files. Any
-substring of the form "${VARNAME}" as part of an option value (in other
+sub-string of the form "${VARNAME}" as part of an option value (in other
 words, on the right of the `='), will be expanded to the value of the
 environment variable called VARNAME.  If no such environment variable
 is defined, or VARNAME is the empty string, the empty string will be
@@ -623,7 +623,16 @@ buffer_pattern=str	If set, fio will fill the io buffers with this
 		the other options related to buffer contents. The setting can
 		be any pattern of bytes, and can be prefixed with 0x for hex
 		values. It may also be a string, where the string must then
-		be wrapped with "".
+		be wrapped with "", e.g.:
+
+		buffer_pattern="abcd"
+		  or
+		buffer_pattern=-12
+		  or
+		buffer_pattern=0xdeadface
+
+		Also you can combine everything together in any order:
+		buffer_pattern=0xdeadface"abcd"-12
 
 dedupe_percentage=int	If set, fio will generate this percentage of
 		identical buffers when writing. These buffers will be
@@ -875,8 +884,8 @@ fsync=int	If writing to a file, issue a sync of the dirty data
 
 fdatasync=int	Like fsync= but uses fdatasync() to only sync data and not
 		metadata blocks.
-		In FreeBSD and Windows there is no fdatasync(), this falls back to
-		using fsync()
+		In FreeBSD and Windows there is no fdatasync(), this falls back
+		to using fsync()
 
 sync_file_range=str:val	Use sync_file_range() for every 'val' number of
 		write operations. Fio will track range of writes that
@@ -1239,7 +1248,12 @@ do_verify=bool	Run the verify phase after a write phase. Only makes sense if
 		verify is set. Defaults to 1.
 
 verify=str	If writing to a file, fio can verify the file contents
-		after each iteration of the job. The allowed values are:
+		after each iteration of the job. Each verification method also implies
+		verification of special header, which is written to the beginning of
+		each block. This header also includes meta information, like offset
+		of the block, block number, timestamp when block was written, etc.
+		verify=str can be combined with verify_pattern=str option.
+		The allowed values are:
 
 			md5	Use an md5 sum of the data area and store
 				it in the header of each block.
@@ -1275,11 +1289,11 @@ verify=str	If writing to a file, fio can verify the file contents
 
 			sha1	Use optimized sha1 as the checksum function.
 
-			meta	Write extra information about each io
-				(timestamp, block number etc.). The block
-				number is verified. The io sequence number is
-				verified for workloads that write data.
-				See also verify_pattern.
+			meta	This option is deprecated, since now meta information is
+				included in generic verification header and meta verification
+				happens by default. For detailed information see the description
+				of the verify=str setting. This option is kept because of
+				compatibility's sake with old configurations. Do not use it.
 
 			pattern	Verify a strict pattern. Normally fio includes
 				a header with some basic information and
@@ -1324,7 +1338,14 @@ verify_pattern=str	If set, fio will fill the io buffers with this
 		buffer at the time(it can be either a decimal or a hex number).
 		The verify_pattern if larger than a 32-bit quantity has to
 		be a hex number that starts with either "0x" or "0X". Use
-		with verify=meta.
+		with verify=str. Also, verify_pattern supports %o format,
+		which means that for each block offset will be written and
+		then verifyied back, e.g.:
+
+		verify_pattern=%o
+
+		Or use combination of everything:
+		verify_pattern=0xff%o"abcd"-12
 
 verify_fatal=bool	Normally fio will keep checking the entire contents
 		before quitting on a block verification failure. If this
@@ -1956,18 +1977,18 @@ Split up, the format is as follows:
 	terse version, fio version, jobname, groupid, error
 	READ status:
 		Total IO (KB), bandwidth (KB/sec), IOPS, runtime (msec)
-		Submission latency: min, max, mean, deviation (usec)
-		Completion latency: min, max, mean, deviation (usec)
+		Submission latency: min, max, mean, stdev (usec)
+		Completion latency: min, max, mean, stdev (usec)
 		Completion latency percentiles: 20 fields (see below)
-		Total latency: min, max, mean, deviation (usec)
-		Bw (KB/s): min, max, aggregate percentage of total, mean, deviation
+		Total latency: min, max, mean, stdev (usec)
+		Bw (KB/s): min, max, aggregate percentage of total, mean, stdev
 	WRITE status:
 		Total IO (KB), bandwidth (KB/sec), IOPS, runtime (msec)
-		Submission latency: min, max, mean, deviation (usec)
-		Completion latency: min, max, mean, deviation (usec)
+		Submission latency: min, max, mean, stdev (usec)
+		Completion latency: min, max, mean, stdev(usec)
 		Completion latency percentiles: 20 fields (see below)
-		Total latency: min, max, mean, deviation (usec)
-		Bw (KB/s): min, max, aggregate percentage of total, mean, deviation
+		Total latency: min, max, mean, stdev (usec)
+		Bw (KB/s): min, max, aggregate percentage of total, mean, stdev
 	CPU usage: user, system, context switches, major faults, minor faults
 	IO depths: <=1, 2, 4, 8, 16, 32, >=64
 	IO latencies microseconds: <=2, 4, 10, 20, 50, 100, 250, 500, 750, 1000
