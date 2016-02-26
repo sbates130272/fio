@@ -109,7 +109,22 @@ static int fio_pvsyncio_queue(struct thread_data *td, struct io_u *io_u)
  * different on 32 bit systems.
  */
 
-#define SYS_preadv2  326 
+static int handle_syscall(long sysid, unsigned long fd,
+			struct iovec *vec,
+			unsigned long vlen, unsigned long offset,
+			int flags)
+{
+	int ret;
+	unsigned long pos_l = offset, pos_h = 0;
+
+	ret = syscall(sysid, fd, vec, vlen, pos_l, pos_h, flags);
+	if ( ret == 0 )
+		return vec->iov_len;
+
+	return ret;
+}
+
+#define SYS_preadv2  327
 #define SYS_pwritev2 327 
 #define RWF_HIPRI    0x00000001 
 static int fio_pv2syncio_queue(struct thread_data *td, struct io_u *io_u)
@@ -125,9 +140,11 @@ static int fio_pv2syncio_queue(struct thread_data *td, struct io_u *io_u)
 	iov->iov_len = io_u->xfer_buflen;
 
 	if (io_u->ddir == DDIR_READ)
-		ret = syscall(SYS_preadv2, f->fd, iov, 1, io_u->offset, 0, RWF_HIPRI);
+		ret = handle_syscall(SYS_preadv2, f->fd, iov, 1, io_u->offset,
+				RWF_HIPRI);
 	else if (io_u->ddir == DDIR_WRITE)
-		ret = syscall(SYS_pwritev2, f->fd, iov, 1, io_u->offset, 0, RWF_HIPRI);
+		ret = handle_syscall(SYS_pwritev2, f->fd, iov, 1, io_u->offset,
+			        RWF_HIPRI);
 	else if (io_u->ddir == DDIR_TRIM) {
 		do_io_u_trim(td, io_u);
 		return FIO_Q_COMPLETED;
