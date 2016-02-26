@@ -98,6 +98,46 @@ static int fio_pvsyncio_queue(struct thread_data *td, struct io_u *io_u)
 }
 #endif
 
+#ifdef CONFIG_PWRITEV2
+
+/* 
+ * Add support for the new preadv2 and pwritev2 system calls. Note
+ * that since no libc support exists for these calls we need to call
+ * the system calls directly. For now we hard code to the system call
+ * ID so be really careful because these could change under you! Also
+ * note that we define them here for 64 bit x86 systems. They will be
+ * different on 32 bit systems.
+ */
+
+#define SYS_preadv2  326 
+#define SYS_pwritev2 327 
+#define RWF_HIPRI    0x00000001 
+static int fio_pv2syncio_queue(struct thread_data *td, struct io_u *io_u)
+{
+	struct syncio_data *sd = td->io_ops->data;
+	struct iovec *iov = &sd->iovecs[0];
+	struct fio_file *f = io_u->file;
+	int ret;
+
+	fio_ro_check(td, io_u);
+
+	iov->iov_base = io_u->xfer_buf;
+	iov->iov_len = io_u->xfer_buflen;
+
+	if (io_u->ddir == DDIR_READ)
+		ret = syscall(SYS_preadv2, f->fd, iov, 1, io_u->offset, 0, RWF_HIPRI);
+	else if (io_u->ddir == DDIR_WRITE)
+		ret = syscall(SYS_pwritev2, f->fd, iov, 1, io_u->offset, 0, RWF_HIPRI);
+	else if (io_u->ddir == DDIR_TRIM) {
+		do_io_u_trim(td, io_u);
+		return FIO_Q_COMPLETED;
+	} else
+		ret = do_io_u_sync(td, io_u);
+
+	return fio_io_end(td, io_u, ret);
+}
+#endif
+
 static int fio_psyncio_queue(struct thread_data *td, struct io_u *io_u)
 {
 	struct fio_file *f = io_u->file;
@@ -374,6 +414,20 @@ static struct ioengine_ops ioengine_pvrw = {
 };
 #endif
 
+#ifdef CONFIG_PWRITEV2
+static struct ioengine_ops ioengine_pv2rw = {
+	.name		= "pv2sync",
+	.version	= FIO_IOOPS_VERSION,
+	.init		= fio_vsyncio_init,
+	.cleanup	= fio_vsyncio_cleanup,
+	.queue		= fio_pv2syncio_queue,
+	.open_file	= generic_open_file,
+	.close_file	= generic_close_file,
+	.get_file_size	= generic_get_file_size,
+	.flags		= FIO_SYNCIO,
+};
+#endif
+
 static void fio_init fio_syncio_register(void)
 {
 	register_ioengine(&ioengine_rw);
@@ -381,6 +435,9 @@ static void fio_init fio_syncio_register(void)
 	register_ioengine(&ioengine_vrw);
 #ifdef CONFIG_PWRITEV
 	register_ioengine(&ioengine_pvrw);
+#endif
+#ifdef CONFIG_PWRITEV2
+	register_ioengine(&ioengine_pv2rw);
 #endif
 }
 
@@ -391,5 +448,8 @@ static void fio_exit fio_syncio_unregister(void)
 	unregister_ioengine(&ioengine_vrw);
 #ifdef CONFIG_PWRITEV
 	unregister_ioengine(&ioengine_pvrw);
+#endif
+#ifdef CONFIG_PWRITEV2
+	unregister_ioengine(&ioengine_pv2rw);
 #endif
 }
