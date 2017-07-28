@@ -1448,6 +1448,12 @@ number, eg echoing 8 will ensure that the OS has 8 huge pages ready for
 use.
 .RE
 .TP
+.BI mem_keep \fR=\fPint "\fR,\fP iomem_keep" \fR=\fPbool
+When the I/O memory buffers used by fio are file-backed the default behaviour
+is to delete (unlink()) the file when it is no longer needed. That is
+problematic when we'd prefer to keep that file. Set this flag to indicate to
+you wish to keep the file after use. The default is to unlink.
+.TP
 .BI iomem_align \fR=\fPint "\fR,\fP mem_align" \fR=\fPint
 This indicates the memory alignment of the IO memory buffers. Note that the
 given alignment is applied to the first IO unit buffer, if using \fBiodepth\fR

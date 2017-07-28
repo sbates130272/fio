@@ -2640,6 +2640,18 @@ struct fio_option fio_options[FIO_MAX_OPTS] = {
 		  },
 	},
 	{
+		.name	= "mem_keep",
+		.alias	= "iomem_keep",
+		.lname	= "Keep I/O memory file if appropriate",
+		.type	= FIO_OPT_STR_SET,
+		.off1	= offsetof(struct thread_options, mem_keep),
+		.help	= "Keep IO memory buffer file if appropriate",
+		.parent	= "mem",
+		.hide	= 1,
+		.category = FIO_OPT_C_IO,
+		.group	= FIO_OPT_G_INVALID,
+	},
+	{
 		.name	= "iomem_align",
 		.alias	= "mem_align",
 		.lname	= "I/O memory alignment",

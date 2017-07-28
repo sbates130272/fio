@@ -185,6 +185,7 @@ struct thread_options {
 	unsigned long long zone_skip;
 	unsigned long long lockmem;
 	enum fio_memtype mem_type;
+	unsigned int mem_keep;
 	unsigned int mem_align;
 
 	unsigned int max_latency;

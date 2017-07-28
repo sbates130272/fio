@@ -1548,6 +1548,14 @@ Buffers and memory
 	should point there. So if it's mounted in :file:`/huge`, you would use
 	`mem=mmaphuge:/huge/somefile`.
 
+.. option:: iomem_keep=bool, mem_keep=bool
+
+	When the I/O memory buffers used by fio are file-backed the default
+	behaviour is to delete (unlink()) the file when it is no
+	longer needed. That is problematic when we'd prefer to keep
+	that file. Set this flag to indicate to you wish to keep the
+	file after use.
+
 .. option:: iomem_align=int
 
 	This indicates the memory alignment of the I/O memory buffers.  Note that

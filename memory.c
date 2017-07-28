@@ -169,7 +169,7 @@ static int alloc_mem_mmap(struct thread_data *td, size_t total_mem)
 		td->orig_buffer = NULL;
 		if (td->mmapfd != 1 && td->mmapfd != -1) {
 			close(td->mmapfd);
-			if (td->o.mmapfile)
+			if (td->o.mmapfile && !td->o.mem_keep)
 				unlink(td->o.mmapfile);
 		}
 
@@ -187,7 +187,8 @@ static void free_mem_mmap(struct thread_data *td, size_t total_mem)
 	if (td->o.mmapfile) {
 		if (td->mmapfd != -1)
 			close(td->mmapfd);
-		unlink(td->o.mmapfile);
+		if (!td->o.mem_keep)
+			unlink(td->o.mmapfile);
 		free(td->o.mmapfile);
 	}
 }
