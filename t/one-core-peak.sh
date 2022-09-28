@@ -247,7 +247,11 @@ show_system() {
     info "system" "KERNEL: $(show_kernel_config_item ${config_item})"
   done
   info "system" "KERNEL: $(cat /proc/cmdline)"
-  info "system" "SElinux: $(getenforce)"
+  if [ -x getenforce ]; then
+      info "system" "SElinux: $(getenforce)"
+  else
+      info "system" "SElinux: Not Installed"
+  fi
   tsc=$(journalctl -k | grep 'tsc: Refined TSC clocksource calibration:' | awk '{print $11}')
   if [ -n "${tsc}" ]; then
     info "system" "TSC: ${tsc} Mhz"
