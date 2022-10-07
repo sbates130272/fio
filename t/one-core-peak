@@ -1,0 +1,321 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Copyright (c) 2022 Eidetic Communications Inc.
+# Based on previous bash version by Erwan Velu and Ville Skyttä
+
+import argparse
+from pathlib import Path
+import os
+import subprocess as sp
+import sys
+from systemd import journal
+
+SYS_BLK = Path('/sys/block')
+SYS_BUS = Path('/sys/bus')
+
+def info(item, msg):
+    print(item, msg, sep=': ')
+
+def hint(msg):
+    info('Warning', msg)
+
+def block_dev_name(dev):
+    return dev.replace('/dev/', '')
+
+# Ensure the binaries are present and executable
+def check_binary(binary):
+    try:
+        sp.check_output([binary, '--help'], stderr=sp.DEVNULL)
+    except (FileNotFoundError, PermissionError):
+        sys.exit(f"{binary} doesn't exist or is not executable")
+
+def detect_first_core(devices):
+    if len(devices) > 1:
+        hint('Passed multiple devices. Running on the first core.')
+
+    device_name = block_dev_name(devices[0])
+    pci_addr = Path(SYS_BLK / device_name / 'device' / 'address').read_text().strip()
+    local_cpu_list = Path(SYS_BUS / 'pci' / 'devices' / pci_addr / 'local_cpulist').read_text()
+    cpu_to_search = local_cpu_list.split('-')[0]
+
+    # Detect which logical cpus belongs to the first physical core
+    # If Hyperthreading is enabled, two cores are returned
+    cpu_list = sp.check_output(['lscpu', '--all', '-pSOCKET,CORE,CPU'], text=True).strip().split('\n')
+    cpu_list = [line.split(',') for line in cpu_list if '#' not in line]
+    core_to_run = [core for core in cpu_list if core[2] == cpu_to_search][0]
+    first_cores = [int(cpu[2]) for cpu in cpu_list if cpu[0:2] == core_to_run[0:2]]
+
+    if len(first_cores) == 0:
+        sys.exit('Cannot detect first core')
+
+    return set(first_cores)
+
+def show_kernel_config(cfg):
+    cfg = f'CONFIG_{cfg}'
+
+    cfg_file = Path(f'/boot/config-{os.uname().release}')
+    if not cfg_file.exists():
+        cfg_file = Path('/proc/config.gz')
+        if not cfg_file.exists():
+            return
+
+    try:
+        status = sp.check_output(['zgrep', f'{cfg}=', cfg_file], text=True).strip()
+    except sp.CalledProcessError:
+        status = ''
+
+    if status == '':
+        status = 'N'
+    else:
+        status = status.split('=')[1]
+
+    info('system', f'KERNEL: {cfg}={status}')
+
+def get_tsc():
+    j = journal.Reader()
+    j.add_match('_TRANSPORT=kernel')
+    for entry in j:
+        msg = str(entry['MESSAGE'])
+        if 'tsc: Refined TSC clocksource calibration:' in msg:
+            return msg.split(':')[2].strip()
+
+    return None
+
+def show_system():
+    cpuinfo = Path('/proc/cpuinfo').read_text().strip().split('\n')
+    cpu_model = [line for line in cpuinfo if 'model name' in line][0]
+    cpu_model = cpu_model.split(':')[1].strip()
+    info('system', f'CPU: {cpu_model}')
+
+    try:
+        mem_device = sp.check_output(['dmidecode', '-t', '17', '-q'], text=True).split('\n')
+        mem_speed = [line for line in mem_device if 'Configured Memory Speed:' in line and 'Unknown' not in line][0]
+        mem_speed = mem_speed.strip().split(': ')[1]
+        info('system', f'MEMORY: {mem_speed}')
+    except sp.CalledProcessError:
+        hint('Failed to get memory speed')
+
+    kernel = os.uname().release
+    info('system', f'KERNEL: {kernel}')
+
+    for cfg in ['BLK_CGROUP', 'BLK_WBT_MQ', 'HZ', 'RETPOLINE',
+                'PAGE_TABLE_ISOLATION']:
+        show_kernel_config(cfg)
+
+    cmdline = Path('/proc/cmdline').read_text().strip()
+    info('system', f'KERNEL: {cmdline}')
+
+    try:
+        selinux = sp.check_output(['getenforce'], text=True, stderr=sp.DEVNULL)
+    except FileNotFoundError:
+        selinux = 'Unknown'
+    info('system', f'SElinux: {selinux}')
+
+    tsc = get_tsc()
+    if tsc:
+        info('system', f'TSC: {tsc}')
+
+def check_device_exists(dev):
+    if not Path(dev).is_block_device():
+        sys.exit(f'{dev} is not a valid block device')
+
+# Ensure io_sched is set to none
+def check_io_scheduler(dev):
+    device_name = block_dev_name(dev)
+    scheduler = Path(SYS_BLK / device_name / 'queue' / 'scheduler')
+
+    try:
+        if '[none]' not in scheduler.read_text():
+            info(device_name, 'set none as io scheduler')
+            scheduler.write_text('none')
+    except FileNotFoundError:
+        sys.exit(f'Cannot find IO scheduler for {device_name}')
+
+def check_sysblock_value(dev, key, value):
+    device_name = block_dev_name(dev)
+    value = str(value)
+
+    target_file = Path(SYS_BLK / device_name / key)
+    try:
+        content = target_file.read_text().strip()
+    except FileNotFoundError:
+        return
+
+    if content != value:
+        try:
+            target_file.write_text(value)
+            info(dev, f'{target_file} set to {value}')
+        except OSError:
+            hint(f'{dev}: Cannot set {value} on {target_file}')
+
+def show_device(dev):
+    device_name = block_dev_name(dev)
+    if is_nvme(dev):
+        show_nvme(dev)
+
+def is_nvme(dev):
+    return 'nvme' in dev
+
+def nvme_cli(device, args, name):
+    try:
+        cmd = ['nvme'] + args + [device]
+        ft = sp.check_output(cmd, stderr=sp.DEVNULL, text=True).strip().split('\n')
+    except sp.CalledProcessError:
+        return None
+
+    for line in ft:
+        if name in line:
+            return line.split(':')[1].strip()
+
+    return None
+
+def nvme_get_feature(device, feature_id, name):
+    return nvme_cli(device, ['get-feature', '-H', '-f', feature_id], name)
+
+def show_nvme(dev):
+    device_name = block_dev_name(dev)
+    sysfs_device = Path(SYS_BLK / device_name / 'device')
+    pci_addr = Path(sysfs_device / 'address').read_text().strip()
+    pci_dir = Path(SYS_BUS / 'pci' / 'devices' / pci_addr)
+
+    link_speed = Path(pci_dir / 'current_link_speed').read_text().strip()
+    irq = Path(pci_dir / 'irq').read_text().strip()
+    cpus = Path(pci_dir / 'local_cpulist').read_text().strip()
+    numa_path = Path(pci_dir / 'numa_node')
+    try:
+        numa = numa_path.read_text().strip()
+    except FileNotFoundError:
+        numa = 'off'
+
+    model = Path(sysfs_device / 'model').read_text().strip()
+    fw = Path(sysfs_device / 'firmware_rev').read_text().strip()
+    serial = Path(sysfs_device / 'serial').read_text().strip()
+
+    info(device_name, f'MODEL={model} FW={fw} serial={serial} PCI={pci_addr}@{link_speed} IRQ={irq} NUMA={numa} CPUS={cpus}')
+    try:
+        sp.check_output(['nvme', '--help'], stderr=sp.DEVNULL)
+    except FileNotFoundError:
+        return
+
+    status = []
+
+    ncqa = nvme_get_feature(dev, '0x7', 'NCQA')
+    if ncqa:
+        status += [f'Completion Queues:{ncqa}']
+
+    nsqa = nvme_get_feature(dev, '0x7', 'NSQA')
+    if nsqa:
+        status += [f'Submission Queues:{nsqa}']
+
+    ps = nvme_get_feature(dev, '0x2', 'PS')
+    if ps:
+        status += [f'PowerState:{ps}']
+
+    apste = nvme_get_feature(dev, '0xc', 'APSTE')
+    if apste:
+        status += [f'Autonomous Power State Transition:{apste:}']
+
+    temp = nvme_cli(dev, ['smart-log'], 'temperature')
+    if temp:
+        status += [f'Temp:{temp}']
+
+    info(device_name, ', '.join(status))
+
+# Print a warning if the nvme poll queues aren't enabled
+def check_poll_queue(devices):
+    if not any([is_nvme(dev) for dev in devices]):
+        return
+
+    poll_queue = Path('/sys/module/nvme/parameters/poll_queues').read_text().strip()
+    if poll_queue == '0':
+        hint('For better performance, you should enable nvme poll queues by setting nvme.poll_queues=32 on the kernel commande line')
+
+# Increase the number of threads if there is more devices or cores than the
+# default value
+def compute_nb_threads(dev_count, cores_count):
+    return max(dev_count, cores_count)
+
+def check_scaling_governor():
+    try:
+        freqinfo = sp.check_output(['cpupower', 'frequency-info'],
+                                   env={'LC_ALL' : 'C'}, text=True).split('\n')
+        driver = [line for line in freqinfo if 'driver:' in line]
+    except sp.CalledProcessError:
+        hint('Cannot detect processor scaling driver')
+        return
+
+    if len(driver) == 0:
+        hint('Cannot detect processor scaling driver')
+        return
+
+    try:
+        sp.check_output(['cpupower', 'frequency-set', '-g', 'performance'],
+                        stderr=sp.DEVNULL)
+    except sp.CalledProcessError:
+        sys.exit('Cannot set scaling processor governor')
+
+def check_idle_governor():
+    cur_governor = Path('/sys/devices/system/cpu/cpuidle/current_governor')
+    if not cur_governor.exists():
+        hint('Cannot detect cpu idle governor')
+        return
+
+    try:
+        cur_governor.write_text('menu')
+    except OSError:
+        sys.exit('Cannot set cpu idle governor to menu')
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-l', '--latency', action='store_true',
+                        help='enable latency reporting')
+    parser.add_argument('device', nargs='+', help='block devices to test')
+
+    args = parser.parse_args()
+
+    if os.getuid() != 0:
+        sys.exit('You should be root to run this tool')
+
+    for binary in ['t/io_uring', 'lscpu', 'zgrep', 'cpupower', 'dmidecode']:
+        check_binary(binary)
+
+    print('##################################################')
+    show_system()
+    for dev in args.device:
+        check_device_exists(dev)
+        check_io_scheduler(dev)
+        check_sysblock_value(dev, 'queue/iostats', 0) # Ensure iostats are disabled
+        check_sysblock_value(dev, 'queue/nomerges', 2) # Ensure merge are disabled
+        check_sysblock_value(dev, 'queue/io_poll', 1) # Ensure io_poll is enabled
+        check_sysblock_value(dev, 'queue/wbt_lat_usec', 0) # Disabling wbt lat
+        show_device(dev)
+    check_poll_queue(args.device)
+
+    first_cores = detect_first_core(args.device)
+    nb_threads = compute_nb_threads(len(args.device), len(first_cores))
+    check_scaling_governor()
+    check_idle_governor()
+    print('##################################################\n')
+
+    cmd = ['t/io_uring', '-b512', '-d128', '-c32', '-s32', '-p1', '-F1', '-B1',
+           f'-n{nb_threads}']
+    if args.latency:
+        tsc = get_tsc()
+        if tsc:
+            tsc.replace('.', '')
+            cmd += ['-t1', f'-T{tsc}000']
+    cmd += args.device
+
+    info('io_uring', f'CPU affinity: {first_cores}')
+    info('io_uring', f'Running {" ".join(cmd)}')
+
+    affinity = os.sched_getaffinity(0)
+    os.sched_setaffinity(0, first_cores)
+    p = sp.Popen(cmd)
+    os.sched_setaffinity(0, affinity)
+
+    try:
+        p.wait()
+    except KeyboardInterrupt:
+        p.kill()
