@@ -155,9 +155,11 @@ def check_sysblock_value(dev, key, value):
     if content != value:
         try:
             target_file.write_text(value)
-            info(dev, f'{target_file} set to {value}')
+            info(dev, f'{target_file} set to {value} (previous value: {content})')
         except OSError:
             hint(f'{dev}: Cannot set {value} on {target_file}')
+    else:
+        info(dev, f'{target_file} already set to optimal value ({value})')
 
 def show_device(dev):
     device_name = block_dev_name(dev)
