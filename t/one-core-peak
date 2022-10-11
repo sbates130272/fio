@@ -51,7 +51,7 @@ def detect_first_core(devices):
 
     return set(first_cores)
 
-def show_kernel_config(cfg):
+def show_kernel_config(cfg, recommended=None):
     cfg = f'CONFIG_{cfg}'
 
     cfg_file = Path(f'/boot/config-{os.uname().release}')
@@ -70,7 +70,14 @@ def show_kernel_config(cfg):
     else:
         status = status.split('=')[1]
 
-    info('system', f'KERNEL: {cfg}={status}')
+    if recommended is None:
+        recommended = ''
+    elif recommended:
+        recommended = ' (recommended: Y)'
+    else:
+        recommended = ' (recommended: N)'
+
+    info('system', f'KERNEL: {cfg}={status}{recommended}')
 
 def get_tsc():
     j = journal.Reader()
@@ -99,9 +106,12 @@ def show_system():
     kernel = os.uname().release
     info('system', f'KERNEL: {kernel}')
 
-    for cfg in ['BLK_CGROUP', 'BLK_WBT_MQ', 'HZ', 'RETPOLINE',
-                'PAGE_TABLE_ISOLATION']:
-        show_kernel_config(cfg)
+    for cfg in [('BLK_CGROUP', False),
+                ('BLK_WBT_MQ', False),
+                ('HZ', None),
+                ('RETPOLINE', False),
+                ('PAGE_TABLE_ISOLATION', False)]:
+        show_kernel_config(*cfg)
 
     cmdline = Path('/proc/cmdline').read_text().strip()
     info('system', f'KERNEL: {cmdline}')
