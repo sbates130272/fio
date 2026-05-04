@@ -1,0 +1,14 @@
+; Example: AMD GPU-initiated NVMe I/O via rocm-xio (requires ./configure --enable-rocm-xio)
+[global]
+ioengine=rocm-xio
+direct=1
+filename=/dev/ng0n1
+rw=randread
+bs=4096
+iodepth=1
+time_based
+runtime=30
+gpu_dev_ids=0
+rocm_xio_queue_depth=64
+
+[job1]

@@ -2345,6 +2345,14 @@ I/O engine
 			:option:`iomem` must not be `cudamalloc`. This ioengine defines
 			engine specific options.
 
+		**rocm-xio**
+			Read and write NVMe namespaces via AMD GPU-initiated I/O using the
+			ROCm `rocm-xio` library (requires librocm-xio, HIP, the rocm-xio
+			kernel module, and :file:`/dev/ng*` namespace devices). Configure
+			with ``./configure --enable-rocm-xio``. Engine-specific options:
+			:option:`gpu_dev_ids`, :option:`rocm_xio_queue_depth`,
+			:option:`rocm_xio_queue_id`, :option:`rocm_xio_mmio_bridge`.
+
 		**dfs**
 			I/O engine supporting asynchronous read and write operations to the
 			DAOS File System (DFS) via libdfs.
@@ -3233,6 +3241,24 @@ with the caveat that when used on the command line, they must come after the
 		to transfer data between RAM and the GPUs. Data is copied from
 		GPU to RAM before a write and copied from RAM to GPU after a
 		read. :option:`verify` does not affect use of cudaMemcpy.
+
+.. option:: gpu_dev_ids=str : [rocm-xio]
+
+	Colon-separated HIP device indices (same semantics as :option:`gpu_dev_ids`
+	for libcufile). Workers round-robin through the list. Default GPU is 0.
+
+.. option:: rocm_xio_queue_depth=int : [rocm-xio]
+
+	SQ/CQ depth passed to rocm-xio queue creation (power of two). Default is 64.
+
+.. option:: rocm_xio_queue_id=int : [rocm-xio]
+
+	NVMe I/O queue id for this job. Default 0 selects an id from the subjob
+	number (avoids collisions when ``numjobs`` > 1).
+
+.. option:: rocm_xio_mmio_bridge=bool : [rocm-xio]
+
+	Use PCI MMIO bridge doorbells (typical for emulated NVMe). Default is false.
 
 .. option:: nfs_url=str : [nfs]
 

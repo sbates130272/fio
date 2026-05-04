@@ -193,6 +193,8 @@ xnvme=""
 isal=""
 isal64=""
 libblkio=""
+rocm_xio="no"
+rocm_xio_prefix=""
 libzbc=""
 dfs=""
 seed_buckets=""
@@ -273,6 +275,10 @@ for opt do
   ;;
   --disable-libblkio) libblkio="no"
   ;;
+  --enable-rocm-xio) rocm_xio="yes"
+  ;;
+  --with-rocm-xio-prefix=*) rocm_xio_prefix="$optarg"
+  ;;
   --disable-tcmalloc) disable_tcmalloc="yes"
   ;;
   --disable-libnfs) libnfs="no"
@@ -334,6 +340,8 @@ if test "$show_help" = "yes" ; then
   echo "--disable-isal          Disable isal support even if found"
   echo "--disable-isal64        Disable isal CRC64 support even if found"
   echo "--disable-libblkio      Disable libblkio support even if found"
+  echo "--enable-rocm-xio       Enable AMD GPU NVMe I/O via librocm-xio"
+  echo "--with-rocm-xio-prefix= Directory prefix for librocm-xio (include/, lib/)"
   echo "--disable-libzbc        Disable libzbc even if found"
   echo "--disable-tcmalloc      Disable tcmalloc support"
   echo "--dynamic-libengines    Lib-based ioengines as dynamic libraries"
@@ -2780,6 +2788,62 @@ fi
 print_config "libblkio engine" "$libblkio"
 
 ##########################################
+# rocm-xio engine (AMD GPU-initiated NVMe via librocm-xio)
+rocm_xio_cflags=""
+rocm_xio_libs=""
+ROCM_XIO_CXX=""
+if test "$rocm_xio" != "no" && test "$targetos" != "Linux" ; then
+  rocm_xio="no"
+fi
+if test "$rocm_xio" != "no" ; then
+  HIPCXX=""
+  if has hipcc; then
+    HIPCXX="hipcc"
+  elif test -x "${ROCM_PATH:-/opt/rocm}/bin/hipcc"; then
+    HIPCXX="${ROCM_PATH:-/opt/rocm}/bin/hipcc"
+  fi
+  if test -z "$HIPCXX"; then
+    if test "$rocm_xio" = "yes"; then
+      feature_not_found "rocm-xio" "hipcc (ROCm HIP compiler)"
+    fi
+    rocm_xio="no"
+  else
+    rocm_inc=""
+    rocm_ld=""
+    rocm_path="${ROCM_PATH:-/opt/rocm}"
+    rocm_inc="-I${rocm_path}/include"
+    if test -n "$rocm_xio_prefix" ; then
+      rocm_inc="$rocm_inc -I${rocm_xio_prefix}/include/rocm-xio"
+      rocm_ld="-L${rocm_xio_prefix}/lib -Wl,-rpath,${rocm_xio_prefix}/lib"
+    fi
+    rocm_sys="-L${rocm_path}/lib -Wl,-rpath,${rocm_path}/lib"
+    cat > $TMPC << EOF
+#include <hip/hip_runtime.h>
+#include <endpoints/nvme-ep/nvme-ep.h>
+int main(void)
+{
+	return (int)sizeof(xio::nvme_ep::nvmeDoorbellParams);
+}
+EOF
+    saved_cc="$cc"
+    cc="$HIPCXX"
+    if compile_prog "-std=c++17 $rocm_inc" "$rocm_ld $rocm_sys -lrocm-xio -lamdhip64 -lhsa-runtime64 -ldl -lstdc++" "rocm-xio"; then
+      rocm_xio="yes"
+      ROCM_XIO_CXX="$HIPCXX"
+      rocm_xio_cflags="-std=c++17 $rocm_inc"
+      rocm_xio_libs="$rocm_ld $rocm_sys -lrocm-xio -lamdhip64 -lhsa-runtime64 -ldl -lstdc++"
+    else
+      if test "$rocm_xio" = "yes"; then
+	feature_not_found "rocm-xio" "librocm-xio with HIP headers"
+      fi
+      rocm_xio="no"
+    fi
+    cc="$saved_cc"
+  fi
+fi
+print_config "rocm-xio engine" "$rocm_xio"
+
+##########################################
 # check march=armv8-a+crc+crypto
 march_armv8_a_crc_crypto="no"
 if test "$cpu" = "arm64" ; then
@@ -3441,6 +3505,12 @@ if test "$libblkio" = "yes" ; then
   output_sym "CONFIG_LIBBLKIO"
   echo "LIBBLKIO_CFLAGS=$libblkio_cflags" >> $config_host_mak
   echo "LIBBLKIO_LIBS=$libblkio_libs" >> $config_host_mak
+fi
+if test "$rocm_xio" = "yes" ; then
+  output_sym "CONFIG_ROCM_XIO"
+  echo "ROCM_XIO_CFLAGS=$rocm_xio_cflags" >> $config_host_mak
+  echo "ROCM_XIO_LIBS=$rocm_xio_libs" >> $config_host_mak
+  echo "ROCM_XIO_CXX=$ROCM_XIO_CXX" >> $config_host_mak
 fi
 if test "$dynamic_engines" = "yes" ; then
   output_sym "CONFIG_DYNAMIC_ENGINES"

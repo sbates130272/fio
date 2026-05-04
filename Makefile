@@ -121,6 +121,13 @@ endif
 ifdef CONFIG_LIBCUFILE
   SOURCE += engines/libcufile.c
 endif
+ifdef CONFIG_ROCM_XIO
+  ifndef ROCM_XIO_CXX
+    ROCM_XIO_CXX := hipcc
+  endif
+  ROCM_XIO_OBJ = engines/rocm-xio.o
+  LIBS += $(ROCM_XIO_LIBS)
+endif
 ifdef CONFIG_LINUX_SPLICE
   SOURCE += engines/splice.c
 endif
@@ -309,6 +316,9 @@ override CFLAGS := -DFIO_VERSION='"$(FIO_VERSION)"' $(FIO_CFLAGS) $(CFLAGS)
 $(foreach eng,$(ENGINES),$(eval $(call engine_template,$(eng))))
 
 OBJS := $(SOURCE:.c=.o)
+ifdef CONFIG_ROCM_XIO
+OBJS += $(ROCM_XIO_OBJ)
+endif
 
 FIO_OBJS = $(OBJS) fio.o
 
@@ -321,6 +331,9 @@ GFIO_OBJS += lex.yy.o y.tab.o
 endif
 
 -include $(OBJS:.o=.d) $(T_OBJS:.o=.d) $(UT_OBJS:.o=.d)
+ifdef CONFIG_ROCM_XIO
+-include engines/rocm-xio.d
+endif
 
 T_SMALLOC_OBJS = t/stest.o
 T_SMALLOC_OBJS += gettime.o fio_sem.o pshared.o smalloc.o t/log.o t/debug.o \
@@ -516,6 +529,12 @@ all: $(PROGS) $(T_TEST_PROGS) $(UT_PROGS) $(SCRIPTS) $(ENGS_OBJS) FORCE
 		sed -e 's/^ *//' -e '/^$$/ d' -e 's/$$/:/' >> $*.d;	\
 	fi
 	@rm -f $*.d.tmp
+
+ifdef CONFIG_ROCM_XIO
+engines/rocm-xio.o: engines/rocm-xio.cpp
+	@mkdir -p $(dir $@)
+	$(QUIET_CC)$(ROCM_XIO_CXX) -o $@ $(ROCM_XIO_CFLAGS) $(CPPFLAGS) -MMD -MP -MF engines/rocm-xio.d -c $<
+endif
 
 ifdef CONFIG_ARITHMETIC
 lex.yy.c: exp/expression-parser.l

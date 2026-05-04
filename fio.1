@@ -2140,6 +2140,13 @@ I/O without transferring buffers between user-space and the kernel,
 unless \fBverify\fR is set or \fBcuda_io\fR is \fBposix\fR. \fBiomem\fR must
 not be \fBcudamalloc\fR. This ioengine defines engine specific options.
 .TP
+.B rocm-xio
+Read and write NVMe namespaces via AMD GPU-initiated I/O using ROCm
+\fBrocm-xio\fR (requires librocm-xio, HIP, the rocm-xio kernel module, and
+\fI/dev/ng*\fR devices). Build with \fB./configure --enable-rocm-xio\fR.
+Engine options: \fBgpu_dev_ids\fR, \fBrocm_xio_queue_depth\fR,
+\fBrocm_xio_queue_id\fR, \fBrocm_xio_mmio_bridge\fR.
+.TP
 .B dfs
 I/O engine supporting asynchronous read and write operations to the DAOS File
 System (DFS) via libdfs.
@@ -2960,6 +2967,18 @@ from RAM to GPU after a read. \fBverify\fR does not affect
 the use of cudaMemcpy.
 .RE
 .RE
+.TP
+.BI (rocm-xio)gpu_dev_ids\fR=\fPstr
+Colon-separated HIP device indices (same idea as libcufile). Default GPU is 0.
+.TP
+.BI (rocm-xio)rocm_xio_queue_depth\fR=\fPint
+SQ/CQ depth for rocm-xio (power of two). Default is 64.
+.TP
+.BI (rocm-xio)rocm_xio_queue_id\fR=\fPint
+NVMe I/O queue id; 0 picks from the subjob index. Default is 0.
+.TP
+.BI (rocm-xio)rocm_xio_mmio_bridge\fR=\fPbool
+Use PCI MMIO bridge doorbells (e.g. QEMU). Default is false.
 .TP
 .BI (dfs)pool
 Specify the label or UUID of the DAOS pool to connect to.
