@@ -121,6 +121,16 @@ endif
 ifdef CONFIG_LIBCUFILE
   SOURCE += engines/libcufile.c
 endif
+ifdef CONFIG_ROCM_XIO
+FIO_CXXFLAGS := $(DEBUGFLAGS) -std=gnu++17 $(OPTFLAGS) $(EXTFLAGS) $(BUILD_CFLAGS) \
+	-Wall -I. -I$(SRCDIR)
+ifndef CONFIG_FIO_NO_OPT
+  FIO_CXXFLAGS += -O3
+endif
+ifdef CONFIG_BUILD_NATIVE
+  FIO_CXXFLAGS += -march=native
+endif
+endif
 ifdef CONFIG_LINUX_SPLICE
   SOURCE += engines/splice.c
 endif
@@ -311,9 +321,15 @@ $(foreach eng,$(ENGINES),$(eval $(call engine_template,$(eng))))
 OBJS := $(SOURCE:.c=.o)
 
 FIO_OBJS = $(OBJS) fio.o
+ifdef CONFIG_ROCM_XIO
+FIO_OBJS += engines/rocm_xio.o
+endif
 
 GFIO_OBJS = $(OBJS) gfio.o graph.o tickmarks.o ghelpers.o goptions.o gerror.o \
 			gclient.o gcompat.o cairo_text_helpers.o printing.o
+ifdef CONFIG_ROCM_XIO
+GFIO_OBJS += engines/rocm_xio.o
+endif
 
 ifdef CONFIG_ARITHMETIC
 FIO_OBJS += lex.yy.o y.tab.o
@@ -535,6 +551,26 @@ endif
 
 lex.yy.o: lex.yy.c y.tab.h
 	$(QUIET_CC)$(CC) -o $@ $(CFLAGS) $(CPPFLAGS) $(LEX_YY_CFLAGS) -c $<
+
+ifdef CONFIG_ROCM_XIO
+engines/rocm_xio.o: engines/rocm_xio.cpp FIO-VERSION-FILE
+	@mkdir -p $(dir $@)
+	$(QUIET_CC)$(CXX) -o $@ $(CPPFLAGS) $(ROCM_XIO_CPPFLAGS) $(FIO_CXXFLAGS) \
+		-DFIO_VERSION='"$(FIO_VERSION)"' -c $(SRCDIR)/engines/rocm_xio.cpp
+	@$(CXX) -MM $(CPPFLAGS) $(ROCM_XIO_CPPFLAGS) $(FIO_CXXFLAGS) \
+		-DFIO_VERSION='"$(FIO_VERSION)"' $(SRCDIR)/engines/rocm_xio.cpp > engines/rocm_xio.d
+	@mv -f engines/rocm_xio.d engines/rocm_xio.d.tmp
+	@sed -e 's|.*:|engines/rocm_xio.o:|' < engines/rocm_xio.d.tmp > engines/rocm_xio.d
+	@if type -p fmt >/dev/null 2>&1; then				\
+	  sed -e 's/.*://' -e 's/\\$$//' < engines/rocm_xio.d.tmp | fmt -w 1 |	\
+	  sed -e 's/^ *//' -e 's/$$/:/' >> engines/rocm_xio.d;		\
+	else								\
+	  sed -e 's/.*://' -e 's/\\$$//' < engines/rocm_xio.d.tmp |	\
+	  tr -cs "[:graph:]" "\n" |					\
+	  sed -e 's/^ *//' -e '/^$$/ d' -e 's/$$/:/' >> engines/rocm_xio.d; \
+	fi
+	@rm -f engines/rocm_xio.d.tmp
+endif
 
 y.tab.o: y.tab.c y.tab.h
 	$(QUIET_CC)$(CC) -o $@ $(CFLAGS) $(CPPFLAGS) $(YTAB_YY_CFLAGS) -c $<

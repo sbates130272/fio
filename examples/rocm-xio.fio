@@ -1,0 +1,19 @@
+# Example job for the rocm-xio engine (Linux, AMD GPU, local NVMe).
+# Requires: rocm-xio kernel module, HIP, librocm-xio, and fio built with
+#   ./configure --enable-rocm-xio
+# Set HSA_FORCE_FINE_GRAIN_PCIE=1 when recommended by rocm-xio docs.
+
+[global]
+ioengine=rocm-xio
+filename=/dev/nvme0n1
+direct=1
+thread=1
+iodepth=1
+gpu_buffer=1
+blocksize=4096
+size=1G
+runtime=30
+time_based=1
+
+[read]
+rw=randread

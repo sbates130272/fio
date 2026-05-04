@@ -2140,6 +2140,12 @@ I/O without transferring buffers between user-space and the kernel,
 unless \fBverify\fR is set or \fBcuda_io\fR is \fBposix\fR. \fBiomem\fR must
 not be \fBcudamalloc\fR. This ioengine defines engine specific options.
 .TP
+.B rocm-xio
+Linux-only I/O engine for NVMe read/write using AMD rocm-xio (GPU submission
+queues). Requires the rocm-xio kernel module, HIP, and librocm-xio. Use
+\fBgpu_buffer=1\fR; offsets and lengths must be LBA aligned. Configure with
+\fB--enable-rocm-xio\fR.
+.TP
 .B dfs
 I/O engine supporting asynchronous read and write operations to the DAOS File
 System (DFS) via libdfs.
@@ -2960,6 +2966,25 @@ from RAM to GPU after a read. \fBverify\fR does not affect
 the use of cudaMemcpy.
 .RE
 .RE
+.TP
+.BI (rocm-xio)gpu_dev_ids\fR=\fPstr
+Colon-separated HIP device indices; workers round-robin. Default is 0.
+.TP
+.BI (rocm-xio)rocm_xio_kmod\fR=\fPstr
+Path to rocm-xio character device. Default is \fB/dev/rocm-xio\fR.
+.TP
+.BI (rocm-xio)rocm_xio_controller\fR=\fPstr
+Override NVMe controller path for queue setup when the job filename is not
+derived automatically.
+.TP
+.BI (rocm-xio)rocm_xio_memory_mode\fR=\fPint
+Queue memory mode bitmask for rocm-xio (default 0).
+.TP
+.BI (rocm-xio)rocm_xio_queue_depth\fR=\fPint
+SQ/CQ depth in entries; must be at least \fBiodepth\fR+1 (default 64).
+.TP
+.BI (rocm-xio)rocm_xio_nsid\fR=\fPint
+NVMe namespace ID for I/O (default 1).
 .TP
 .BI (dfs)pool
 Specify the label or UUID of the DAOS pool to connect to.

@@ -14,13 +14,14 @@ else
 fi
 
 TMPC="${TMPDIR1}/fio-conf-${RANDOM}-$$-${RANDOM}.c"
+TMPCXX="${TMPDIR1}/fio-conf-${RANDOM}-$$-${RANDOM}.cpp"
 TMPC2="${TMPDIR1}/fio-conf-${RANDOM}-$$-${RANDOM}-2.c"
 TMPO="${TMPDIR1}/fio-conf-${RANDOM}-$$-${RANDOM}.o"
 TMPE="${TMPDIR1}/fio-conf-${RANDOM}-$$-${RANDOM}.exe"
 
 # NB: do not call "exit" in the trap handler; this is buggy with some shells;
 # see <1285349658-3122-1-git-send-email-loic.minier@linaro.org>
-trap "rm -f $TMPC $TMPC2 $TMPO $TMPE" EXIT INT QUIT TERM
+trap "rm -f $TMPC $TMPCXX $TMPC2 $TMPO $TMPE" EXIT INT QUIT TERM
 
 rm -rf config.log
 
@@ -97,6 +98,31 @@ compile_prog() {
   local_ldflags="$2 $LIBS"
   echo "Compiling test case $3" >> config.log
   do_cc $CFLAGS $CONFIGURE_CFLAGS $local_cflags -o $TMPE $TMPC $LDFLAGS $local_ldflags
+}
+
+do_cxx() {
+  echo $cxx "$@" >> config.log
+  $cxx "$@" >> config.log 2>&1 || return $?
+  if test "$werror" != "yes"; then
+    return 0
+  fi
+  case "$*" in
+    *-Werror*)
+      return 0
+    ;;
+  esac
+  echo $cxx -Werror "$@" >> config.log
+  $cxx -Werror "$@" >> config.log 2>&1 && return $?
+  echo "ERROR: configure C++ test passed without -Werror but failed with -Werror."
+  fatal "You can run configure with --disable-werror to bypass this check."
+}
+
+compile_prog_cxx() {
+  local_cflags="$1"
+  local_ldflags="$2 $LIBS"
+  echo "Compiling C++ test case $3" >> config.log
+  do_cxx $CFLAGS $CONFIGURE_CFLAGS $local_cflags -std=gnu++17 -o $TMPE $TMPCXX \
+    $LDFLAGS $local_ldflags
 }
 
 feature_not_found() {
@@ -182,6 +208,9 @@ pmem="no"
 cuda="no"
 cuda13="no"
 libcufile="no"
+rocm_xio="no"
+rocm_xio_include=""
+rocm_xio_libdir=""
 disable_lex=""
 disable_pmem="no"
 disable_native="no"
@@ -255,6 +284,14 @@ for opt do
   ;;
   --enable-libcufile) libcufile="yes"
   ;;
+  --enable-rocm-xio) rocm_xio="yes"
+  ;;
+  --disable-rocm-xio) rocm_xio="no"
+  ;;
+  --with-rocm-xio-include=*) rocm_xio_include="$optarg"
+  ;;
+  --with-rocm-xio-libdir=*) rocm_xio_libdir="$optarg"
+  ;;
   --disable-native) disable_native="yes"
   ;;
   --with-ime=*) ime_path="$optarg"
@@ -326,6 +363,10 @@ if test "$show_help" = "yes" ; then
   echo "--disable-optimizations Don't enable compiler optimizations"
   echo "--enable-cuda           Enable GPUDirect RDMA support"
   echo "--enable-libcufile      Enable GPUDirect Storage cuFile support"
+  echo "--enable-rocm-xio       Enable AMD rocm-xio (GPU NVMe) engine"
+  echo "--disable-rocm-xio      Disable rocm-xio even if detected"
+  echo "--with-rocm-xio-include=DIR  Extra include path for rocm-xio headers"
+  echo "--with-rocm-xio-libdir=DIR   Extra library path for librocm-xio"
   echo "--disable-native        Don't build for native host"
   echo "--with-ime=             Install path for DDN's Infinite Memory Engine"
   echo "--enable-libiscsi       Enable iscsi support"
@@ -359,6 +400,8 @@ if test -z "${CC}${cross_prefix}"; then
 else
   cc="${CC-${cross_prefix}gcc}"
 fi
+
+cxx="${CXX-${cross_prefix}g++}"
 
 if check_define __ANDROID__ ; then
   targetos="Android"
@@ -2856,6 +2899,45 @@ fi
 print_config "libcufile" "$libcufile"
 
 ##########################################
+# rocm-xio (AMD GPU NVMe via librocm-xio)
+rocm_xio_cflags=""
+rocm_xio_ldflags=""
+if test "$rocm_xio" != "no" && test "$targetos" = "Linux" ; then
+  rocm_xio_try_cflags="-I/opt/rocm/include/rocm-xio"
+  rocm_xio_try_ldflags="-L/opt/rocm/lib -Wl,-rpath,/opt/rocm/lib"
+  if test -n "$rocm_xio_include" ; then
+    rocm_xio_try_cflags="-I$rocm_xio_include"
+  fi
+  if test -n "$rocm_xio_libdir" ; then
+    rocm_xio_try_ldflags="-L$rocm_xio_libdir -Wl,-rpath,$rocm_xio_libdir"
+  fi
+cat > $TMPCXX << EOF
+#include <hip/hip_runtime.h>
+#include <xio.h>
+#include <endpoints/nvme-ep/nvme-ep.h>
+int main(void)
+{
+  (void)hipSetDevice(0);
+  return 0;
+}
+EOF
+  if compile_prog_cxx "$rocm_xio_try_cflags" \
+      "$rocm_xio_try_ldflags -lrocm-xio -lamdhip64 -lhsa-runtime64 -ldl" \
+      "rocm-xio"; then
+    rocm_xio="yes"
+    rocm_xio_cflags="$rocm_xio_try_cflags"
+    rocm_xio_ldflags="$rocm_xio_try_ldflags -lrocm-xio -lamdhip64 -lhsa-runtime64 -ldl"
+    LIBS="$rocm_xio_ldflags $LIBS"
+  else
+    if test "$rocm_xio" = "yes" ; then
+      feature_not_found "rocm-xio" "ROCm HIP, librocm-xio, and headers under include/rocm-xio"
+    fi
+    rocm_xio="no"
+  fi
+fi
+print_config "rocm-xio" "$rocm_xio"
+
+##########################################
 # cuda 13 probe
 if test "$cuda" != "no" || test "$libcufile" != "no"; then
 cat > $TMPC << EOF
@@ -3373,6 +3455,11 @@ fi
 if test "$libcufile" = "yes" ; then
   output_sym "CONFIG_LIBCUFILE"
 fi
+if test "$rocm_xio" = "yes" ; then
+  output_sym "CONFIG_ROCM_XIO"
+  echo "ROCM_XIO_CPPFLAGS=$rocm_xio_cflags" >> $config_host_mak
+  echo "ROCM_XIO_LDFLAGS=$rocm_xio_ldflags" >> $config_host_mak
+fi
 if test "$cuda13" = "yes" ; then
   output_sym "CONFIG_CUDA13"
 fi
@@ -3489,6 +3576,7 @@ echo "GFIO_LIBS+=$GFIO_LIBS" >> $config_host_mak
 echo "CFLAGS+=$CFLAGS" >> $config_host_mak
 echo "LDFLAGS+=$LDFLAGS" >> $config_host_mak
 echo "CC=$cc" >> $config_host_mak
+echo "CXX=$cxx" >> $config_host_mak
 echo "BUILD_CFLAGS=$BUILD_CFLAGS $CFLAGS" >> $config_host_mak
 echo "INSTALL_PREFIX=$prefix" >> $config_host_mak
 
