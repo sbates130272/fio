@@ -23,6 +23,7 @@ DEBUGFLAGS = -DFIO_INC_DEBUG
 CPPFLAGS+= -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -DFIO_INTERNAL $(DEBUGFLAGS)
 OPTFLAGS= -g -ffast-math
 FIO_CFLAGS= -std=gnu99 -Wwrite-strings -Wall -Wdeclaration-after-statement $(OPTFLAGS) $(EXTFLAGS) $(BUILD_CFLAGS) -I. -I$(SRCDIR)
+FIO_CXXFLAGS= -std=gnu++17 $(OPTFLAGS) $(EXTFLAGS) $(BUILD_CFLAGS) -I. -I$(SRCDIR)
 LIBS	+= -lm $(EXTLIBS)
 PROGS	= fio
 SCRIPTS = $(addprefix $(SRCDIR)/,tools/fio_generate_plots tools/plot/fio2gnuplot tools/genfio tools/fiologparser.py tools/hist/fiologparser_hist.py tools/hist/fio-histo-log-pctiles.py tools/fio_jsonplus_clat2csv)
@@ -216,6 +217,13 @@ ifdef CONFIG_LIBBLKIO
   libblkio_CFLAGS = $(LIBBLKIO_CFLAGS)
   ENGINES += libblkio
 endif
+ifdef CONFIG_ROCM_XIO
+  rocm_xio_SRCS = engines/rocm_xio.c
+  rocm_xio_EXTRA_SRCS = engines/rocm_xio_bridge.cpp
+  rocm_xio_LIBS = $(ROCM_XIO_LIBS)
+  rocm_xio_CFLAGS = $(ROCM_XIO_CFLAGS)
+  ENGINES += rocm_xio
+endif
 ifeq ($(CONFIG_TARGET_OS), Linux)
   SOURCE += diskutil.c fifo.c blktrace.c cgroup.c trim.c engines/sg.c \
 		oslib/linux-dev-lookup.c engines/io_uring.c engines/nvme.c
@@ -287,16 +295,22 @@ ifdef CONFIG_DYNAMIC_ENGINES
  DYNAMIC_ENGS := $(ENGINES)
 define engine_template =
 $(1)_OBJS := $$($(1)_SRCS:.c=.o)
+ifneq ($$($(1)_EXTRA_SRCS),)
+$(1)_OBJS += $$($(1)_EXTRA_SRCS:.cpp=.o)
+endif
 $$($(1)_OBJS): CFLAGS := -fPIC $$($(1)_CFLAGS) $(CFLAGS)
+$$($(1)_OBJS): CXXFLAGS := -fPIC $$($(1)_CFLAGS) $(CXXFLAGS)
 engines/fio-$(1).so: $$($(1)_OBJS)
-	$$(QUIET_LINK)$(CC) $(LDFLAGS) -shared -rdynamic -fPIC -Wl,-soname,fio-$(1).so.1 -o $$@ $$< $$($(1)_LIBS)
+	$$(QUIET_LINK)$(CXX) $(LDFLAGS) -shared -rdynamic -fPIC -Wl,-soname,fio-$(1).so.1 -o $$@ $$^ $$($(1)_LIBS)
 ENGS_OBJS += engines/fio-$(1).so
 endef
 else # !CONFIG_DYNAMIC_ENGINES
 define engine_template =
 SOURCE += $$($(1)_SRCS)
+SOURCE_CPP += $$($(1)_EXTRA_SRCS)
 LIBS += $$($(1)_LIBS)
 override CFLAGS += $$($(1)_CFLAGS)
+override CXXFLAGS += $$($(1)_CFLAGS)
 endef
 endif
 
@@ -305,10 +319,12 @@ FIO-VERSION-FILE: FORCE
 -include FIO-VERSION-FILE
 
 override CFLAGS := -DFIO_VERSION='"$(FIO_VERSION)"' $(FIO_CFLAGS) $(CFLAGS)
+override CXXFLAGS := -DFIO_VERSION='"$(FIO_VERSION)"' $(FIO_CXXFLAGS) $(CXXFLAGS)
 
 $(foreach eng,$(ENGINES),$(eval $(call engine_template,$(eng))))
 
 OBJS := $(SOURCE:.c=.o)
+OBJS += $(SOURCE_CPP:.cpp=.o)
 
 FIO_OBJS = $(OBJS) fio.o
 
@@ -505,6 +521,22 @@ all: $(PROGS) $(T_TEST_PROGS) $(UT_PROGS) $(SCRIPTS) $(ENGS_OBJS) FORCE
 	@mkdir -p $(dir $@)
 	$(QUIET_CC)$(CC) -o $@ $(CFLAGS) $(CPPFLAGS) -c $<
 	@$(CC) -MM $(CFLAGS) $(CPPFLAGS) $(SRCDIR)/$*.c > $*.d
+	@mv -f $*.d $*.d.tmp
+	@sed -e 's|.*:|$*.o:|' < $*.d.tmp > $*.d
+	@if type -p fmt >/dev/null 2>&1; then				\
+		sed -e 's/.*://' -e 's/\\$$//' < $*.d.tmp | fmt -w 1 |	\
+		sed -e 's/^ *//' -e 's/$$/:/' >> $*.d;			\
+	else								\
+		sed -e 's/.*://' -e 's/\\$$//' < $*.d.tmp |		\
+		tr -cs "[:graph:]" "\n" |				\
+		sed -e 's/^ *//' -e '/^$$/ d' -e 's/$$/:/' >> $*.d;	\
+	fi
+	@rm -f $*.d.tmp
+
+%.o : %.cpp
+	@mkdir -p $(dir $@)
+	$(QUIET_CC)$(CXX) -o $@ $(CXXFLAGS) $(CPPFLAGS) -c $<
+	@$(CXX) -MM $(CXXFLAGS) $(CPPFLAGS) $(SRCDIR)/$*.cpp > $*.d
 	@mv -f $*.d $*.d.tmp
 	@sed -e 's|.*:|$*.o:|' < $*.d.tmp > $*.d
 	@if type -p fmt >/dev/null 2>&1; then				\

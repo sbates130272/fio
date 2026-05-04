@@ -2358,6 +2358,11 @@ struct fio_option fio_options[FIO_MAX_OPTS] = {
 			    .help = "XNVME IO engine",
 			  },
 #endif
+#ifdef CONFIG_ROCM_XIO
+			  { .ival = "rocm_xio",
+			    .help = "ROCm XIO NVMe GPU-initiated IO engine",
+			  },
+#endif
 		},
 	},
 	{

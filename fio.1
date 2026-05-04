@@ -2159,6 +2159,11 @@ flexibility to access GNU/Linux Kernel NVMe driver via libaio, IOCTLs, io_uring,
 the SPDK NVMe driver, or your own custom NVMe driver. The xnvme engine includes
 engine specific options. (See \fIhttps://xnvme.io/\fR).
 .TP
+.B rocm_xio
+I/O engine using ROCm XIO NVMe endpoint APIs to submit NVMe commands from an
+AMD GPU. This engine uses rocm-xio queue management and GPU-accessible buffers
+to perform synchronous read/write operations against an NVMe controller.
+.TP
 .B libblkio
 Use the libblkio library (\fIhttps://gitlab.com/libblkio/libblkio\fR). The
 specific driver to use must be set using \fBlibblkio_driver\fR. If
@@ -2960,6 +2965,40 @@ from RAM to GPU after a read. \fBverify\fR does not affect
 the use of cudaMemcpy.
 .RE
 .RE
+.TP
+.BI (rocm_xio)rocm_xio_controller\fR=\fPstr
+NVMe controller device path used by rocm-xio (for example /dev/nvme0). This
+option is required.
+.TP
+.BI (rocm_xio)rocm_xio_queue_id\fR=\fPint
+NVMe I/O queue ID used by rocm-xio. The default is 0, which auto-detects the
+last available I/O queue ID.
+.TP
+.BI (rocm_xio)rocm_xio_queue_len\fR=\fPint
+Queue depth in entries. This must be a power of two. The default is 64.
+.TP
+.BI (rocm_xio)rocm_xio_nsid\fR=\fPint
+Namespace ID used for NVMe read and write commands. The default is 1.
+.TP
+.BI (rocm_xio)rocm_xio_gpu_id\fR=\fPint
+HIP GPU device index used by rocm-xio. The default is 0.
+.TP
+.BI (rocm_xio)rocm_xio_memory_mode\fR=\fPint
+rocm-xio memory mode bit mask controlling queue and data buffer placement.
+.TP
+.BI (rocm_xio)rocm_xio_mmio_bridge\fR=\fPbool
+Use PCI MMIO bridge routing for doorbell writes. The default is false.
+.TP
+.BI (rocm_xio)rocm_xio_allow_rootfs\fR=\fPbool
+Allow rocm-xio to run against an NVMe controller that hosts the root
+filesystem. The default is false.
+.TP
+.BI (rocm_xio)rocm_xio_lba_size\fR=\fPint
+Optional namespace LBA size override. A non-zero value must match the
+controller-reported LBA size.
+.TP
+.BI (rocm_xio)rocm_xio_lfsr_seed\fR=\fPint
+LFSR seed value passed to rocm-xio paths.
 .TP
 .BI (dfs)pool
 Specify the label or UUID of the DAOS pool to connect to.

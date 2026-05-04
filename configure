@@ -88,6 +88,11 @@ do_cc() {
     fatal "You can run configure with --disable-werror to bypass this check."
 }
 
+do_cxx() {
+    echo $cxx "$@" >> config.log
+    $cxx "$@" >> config.log 2>&1 || return $?
+}
+
 compile_object() {
   do_cc $CFLAGS $CONFIGURE_CFLAGS -c -o $TMPO $TMPC
 }
@@ -97,6 +102,13 @@ compile_prog() {
   local_ldflags="$2 $LIBS"
   echo "Compiling test case $3" >> config.log
   do_cc $CFLAGS $CONFIGURE_CFLAGS $local_cflags -o $TMPE $TMPC $LDFLAGS $local_ldflags
+}
+
+compile_prog_cxx() {
+  local_cflags="$1"
+  local_ldflags="$2 $LIBS"
+  echo "Compiling C++ test case $3" >> config.log
+  do_cxx $CFLAGS $CONFIGURE_CFLAGS $local_cflags -o $TMPE $TMPC $LDFLAGS $local_ldflags
 }
 
 feature_not_found() {
@@ -190,6 +202,7 @@ libiscsi="no"
 libnbd="no"
 libnfs=""
 xnvme=""
+rocm_xio=""
 isal=""
 isal64=""
 libblkio=""
@@ -267,6 +280,8 @@ for opt do
   ;;
   --disable-xnvme) xnvme="no"
   ;;
+  --disable-rocm-xio) rocm_xio="no"
+  ;;
   --disable-isal) isal="no"
   ;;
   --disable-isal64) isal64="no"
@@ -331,6 +346,7 @@ if test "$show_help" = "yes" ; then
   echo "--enable-libiscsi       Enable iscsi support"
   echo "--enable-libnbd         Enable libnbd (NBD engine) support"
   echo "--disable-xnvme         Disable xnvme support even if found"
+  echo "--disable-rocm-xio      Disable rocm-xio support even if found"
   echo "--disable-isal          Disable isal support even if found"
   echo "--disable-isal64        Disable isal CRC64 support even if found"
   echo "--disable-libblkio      Disable libblkio support even if found"
@@ -358,6 +374,19 @@ if test -z "${CC}${cross_prefix}"; then
   fi
 else
   cc="${CC-${cross_prefix}gcc}"
+fi
+if test -z "${CXX}"; then
+  if test ! -z "${cross_prefix}" && has "${cross_prefix}g++"; then
+    cxx="${cross_prefix}g++"
+  elif has g++; then
+    cxx=g++
+  elif has clang++; then
+    cxx=clang++
+  else
+    cxx="$cc"
+  fi
+else
+  cxx="$CXX"
 fi
 
 if check_define __ANDROID__ ; then
@@ -632,6 +661,7 @@ if test ! -z "$target_win_ver"; then
   print_config "Target Windows version" "$target_win_ver"
 fi
 print_config "Compiler" "$cc"
+print_config "C++ Compiler" "$cxx"
 print_config "Cross compile" "$cross_compile"
 echo
 
@@ -2720,6 +2750,34 @@ if test "$xnvme" != "no" ; then
 fi
 print_config "xnvme engine" "$xnvme"
 
+##########################################
+# Check if we have rocm-xio
+if test "$rocm_xio" != "no" ; then
+  if pkg-config --exists rocm-xio 2>/dev/null ; then
+    rocm_xio_cflags=$(pkg-config --cflags rocm-xio)
+    rocm_xio_libs="$(pkg-config --libs rocm-xio) -lstdc++"
+  else
+    rocm_xio_cflags="-I/opt/rocm/include -I/opt/rocm/include/rocm-xio"
+    rocm_xio_libs="-L/opt/rocm/lib -lrocm-xio -lamdhip64 -lhsakmt -ldl -lstdc++"
+  fi
+
+  cat > $TMPC << EOF
+#include <xio.h>
+#include <endpoints/nvme-ep/nvme-ep.h>
+int main(void)
+{
+  xio::nvme_ep::nvmeEpConfig cfg;
+  return (int) cfg.queueLength;
+}
+EOF
+  if compile_prog_cxx "-std=gnu++17 $rocm_xio_cflags" "$rocm_xio_libs" "rocm-xio"; then
+    rocm_xio="yes"
+  else
+    rocm_xio="no"
+  fi
+fi
+print_config "rocm-xio engine" "$rocm_xio"
+
 if test "$targetos" = "Linux" ; then
 ##########################################
 # Check ISA-L support
@@ -3431,6 +3489,11 @@ if test "$xnvme" = "yes" ; then
   echo "LIBXNVME_CFLAGS=$xnvme_cflags" >> $config_host_mak
   echo "LIBXNVME_LIBS=$xnvme_libs" >> $config_host_mak
 fi
+if test "$rocm_xio" = "yes" ; then
+  output_sym "CONFIG_ROCM_XIO"
+  echo "ROCM_XIO_CFLAGS=$rocm_xio_cflags" >> $config_host_mak
+  echo "ROCM_XIO_LIBS=$rocm_xio_libs" >> $config_host_mak
+fi
 if test "$isal" = "yes" ; then
   output_sym "CONFIG_LIBISAL"
 fi
@@ -3489,6 +3552,7 @@ echo "GFIO_LIBS+=$GFIO_LIBS" >> $config_host_mak
 echo "CFLAGS+=$CFLAGS" >> $config_host_mak
 echo "LDFLAGS+=$LDFLAGS" >> $config_host_mak
 echo "CC=$cc" >> $config_host_mak
+echo "CXX=$cxx" >> $config_host_mak
 echo "BUILD_CFLAGS=$BUILD_CFLAGS $CFLAGS" >> $config_host_mak
 echo "INSTALL_PREFIX=$prefix" >> $config_host_mak
 

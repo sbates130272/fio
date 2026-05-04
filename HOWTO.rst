@@ -2364,6 +2364,14 @@ I/O engine
 			the SPDK NVMe driver, or your own custom NVMe driver. The xnvme engine includes
 			engine specific options. (See https://xnvme.io).
 
+		**rocm_xio**
+			I/O engine using AMD ROCm-XIO NVMe endpoint support for
+			GPU-initiated I/O to NVMe controllers. This engine submits
+			NVMe commands through rocm-xio queue setup and executes
+			data-path transfers through GPU-accessible buffers. It is a
+			synchronous engine and currently supports read and write
+			I/O paths (trim is not supported).
+
 		**libblkio**
 			Use the libblkio library
 			(https://gitlab.com/libblkio/libblkio). The specific
@@ -3233,6 +3241,56 @@ with the caveat that when used on the command line, they must come after the
 		to transfer data between RAM and the GPUs. Data is copied from
 		GPU to RAM before a write and copied from RAM to GPU after a
 		read. :option:`verify` does not affect use of cudaMemcpy.
+
+.. option:: rocm_xio_controller=str : [rocm_xio]
+
+	Path to the NVMe controller character device used by rocm-xio,
+	for example ``/dev/nvme0``.
+
+.. option:: rocm_xio_queue_id=int : [rocm_xio]
+
+	NVMe I/O queue identifier used for queue creation. A value of
+	``0`` auto-detects and uses the highest available I/O queue id.
+
+.. option:: rocm_xio_queue_len=int : [rocm_xio]
+
+	Queue depth in entries. This must be a power of two.
+	Default: ``64``.
+
+.. option:: rocm_xio_nsid=int : [rocm_xio]
+
+	NVMe namespace identifier to issue read/write commands against.
+	Default: ``1``.
+
+.. option:: rocm_xio_gpu_id=int : [rocm_xio]
+
+	HIP GPU device id used by rocm-xio for queue and buffer setup.
+	Default: ``0``.
+
+.. option:: rocm_xio_memory_mode=int : [rocm_xio]
+
+	ROCm-XIO memory-mode bitmask controlling queue/data placement.
+	Default: ``0``.
+
+.. option:: rocm_xio_mmio_bridge=bool : [rocm_xio]
+
+	If set, route doorbell writes via a PCI MMIO bridge rather than
+	direct NVMe BAR0 mappings. Default: false.
+
+.. option:: rocm_xio_allow_rootfs=bool : [rocm_xio]
+
+	Allow running rocm-xio I/O against a controller that appears to
+	host the root filesystem. This is unsafe and disabled by default.
+
+.. option:: rocm_xio_lba_size=int : [rocm_xio]
+
+	Optional namespace LBA-size override in bytes. If set, it must
+	match the LBA size reported by the target namespace.
+
+.. option:: rocm_xio_lfsr_seed=int : [rocm_xio]
+
+	LFSR seed forwarded into the rocm-xio path for deterministic
+	data-pattern behavior.
 
 .. option:: nfs_url=str : [nfs]
 
