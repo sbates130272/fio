@@ -88,6 +88,28 @@ do_cc() {
     fatal "You can run configure with --disable-werror to bypass this check."
 }
 
+do_cxx() {
+    if test -z "$cxx"; then
+        return 1
+    fi
+    echo $cxx "$@" >> config.log
+    $cxx "$@" >> config.log 2>&1 || return $?
+    if test "$werror" != "yes"; then
+        return 0
+    fi
+    case "$*" in
+        *-Werror*)
+           return 0
+        ;;
+    esac
+    echo $cxx -Werror "$@" >> config.log
+    $cxx -Werror "$@" >> config.log 2>&1 && return $?
+    echo "ERROR: configure test passed without -Werror but failed with -Werror."
+    echo "This is probably a bug in the configure script. The failing command"
+    echo "will be at the bottom of config.log."
+    fatal "You can run configure with --disable-werror to bypass this check."
+}
+
 compile_object() {
   do_cc $CFLAGS $CONFIGURE_CFLAGS -c -o $TMPO $TMPC
 }
@@ -97,6 +119,13 @@ compile_prog() {
   local_ldflags="$2 $LIBS"
   echo "Compiling test case $3" >> config.log
   do_cc $CFLAGS $CONFIGURE_CFLAGS $local_cflags -o $TMPE $TMPC $LDFLAGS $local_ldflags
+}
+
+compile_prog_cxx() {
+  local_cflags="$1"
+  local_ldflags="$2 $LIBS"
+  echo "Compiling C++ test case $3" >> config.log
+  do_cxx $CFLAGS -x c++ $local_cflags -o $TMPE $TMPC $LDFLAGS $local_ldflags
 }
 
 feature_not_found() {
@@ -182,6 +211,7 @@ pmem="no"
 cuda="no"
 cuda13="no"
 libcufile="no"
+rocm_xio=""
 disable_lex=""
 disable_pmem="no"
 disable_native="no"
@@ -255,6 +285,10 @@ for opt do
   ;;
   --enable-libcufile) libcufile="yes"
   ;;
+  --enable-rocm-xio) rocm_xio="yes"
+  ;;
+  --disable-rocm-xio) rocm_xio="no"
+  ;;
   --disable-native) disable_native="yes"
   ;;
   --with-ime=*) ime_path="$optarg"
@@ -326,6 +360,8 @@ if test "$show_help" = "yes" ; then
   echo "--disable-optimizations Don't enable compiler optimizations"
   echo "--enable-cuda           Enable GPUDirect RDMA support"
   echo "--enable-libcufile      Enable GPUDirect Storage cuFile support"
+  echo "--enable-rocm-xio       Enable rocm-xio NVMe engine support"
+  echo "--disable-rocm-xio      Disable rocm-xio support even if found"
   echo "--disable-native        Don't build for native host"
   echo "--with-ime=             Install path for DDN's Infinite Memory Engine"
   echo "--enable-libiscsi       Enable iscsi support"
@@ -358,6 +394,18 @@ if test -z "${CC}${cross_prefix}"; then
   fi
 else
   cc="${CC-${cross_prefix}gcc}"
+fi
+
+if test -n "${CXX}"; then
+  cxx="${CXX}"
+elif has gxx; then
+  cxx="g++"
+elif has clangxx; then
+  cxx="clang++"
+elif has cxx; then
+  cxx="c++"
+else
+  cxx=""
 fi
 
 if check_define __ANDROID__ ; then
@@ -2720,6 +2768,54 @@ if test "$xnvme" != "no" ; then
 fi
 print_config "xnvme engine" "$xnvme"
 
+##########################################
+# Check if we have rocm-xio
+if test "$rocm_xio" != "no" ; then
+  rocm_xio_req="$rocm_xio"
+  rocm_xio="no"
+  rocm_xio_cflags=""
+  rocm_xio_libs=""
+  cat > $TMPC << EOF
+#include <xio.h>
+int main(int argc, char **argv)
+{
+  auto endpoint = xio::createEndpoint("nvme-ep");
+  (void)argv;
+  return endpoint ? 0 : argc;
+}
+EOF
+  if test -n "$cxx" ; then
+    if pkg-config --exists rocm-xio 2>/dev/null; then
+      rocm_xio_cflags="$(pkg-config --cflags rocm-xio)"
+      rocm_xio_libs="$(pkg-config --libs rocm-xio) -lstdc++"
+      if compile_prog_cxx "-std=gnu++17 $rocm_xio_cflags" "$rocm_xio_libs" \
+	  "rocm-xio"; then
+	rocm_xio="yes"
+      fi
+    fi
+    if test "$rocm_xio" = "no" ; then
+      for rocm_xio_inc in /opt/rocm/include/rocm-xio /usr/include/rocm-xio ; do
+	for rocm_xio_libdir in /opt/rocm/lib /usr/lib64 \
+	  /usr/lib/x86_64-linux-gnu /usr/lib ; do
+	  rocm_xio_try_cflags="-I$rocm_xio_inc"
+	  rocm_xio_try_libs="-L$rocm_xio_libdir -Wl,-rpath,$rocm_xio_libdir -lrocm-xio -lstdc++ -ldl"
+	  if compile_prog_cxx "-std=gnu++17 $rocm_xio_try_cflags" \
+	    "$rocm_xio_try_libs" "rocm-xio"; then
+	    rocm_xio="yes"
+	    rocm_xio_cflags="$rocm_xio_try_cflags"
+	    rocm_xio_libs="$rocm_xio_try_libs"
+	    break 2
+	  fi
+	done
+      done
+    fi
+  fi
+  if test "$rocm_xio" = "no" && test "$rocm_xio_req" = "yes" ; then
+    feature_not_found "rocm-xio" "ROCm rocm-xio headers and library"
+  fi
+fi
+print_config "rocm-xio engine" "$rocm_xio"
+
 if test "$targetos" = "Linux" ; then
 ##########################################
 # Check ISA-L support
@@ -3431,6 +3527,11 @@ if test "$xnvme" = "yes" ; then
   echo "LIBXNVME_CFLAGS=$xnvme_cflags" >> $config_host_mak
   echo "LIBXNVME_LIBS=$xnvme_libs" >> $config_host_mak
 fi
+if test "$rocm_xio" = "yes" ; then
+  output_sym "CONFIG_ROCM_XIO"
+  echo "ROCM_XIO_CFLAGS=$rocm_xio_cflags" >> $config_host_mak
+  echo "ROCM_XIO_LIBS=$rocm_xio_libs" >> $config_host_mak
+fi
 if test "$isal" = "yes" ; then
   output_sym "CONFIG_LIBISAL"
 fi
@@ -3489,6 +3590,9 @@ echo "GFIO_LIBS+=$GFIO_LIBS" >> $config_host_mak
 echo "CFLAGS+=$CFLAGS" >> $config_host_mak
 echo "LDFLAGS+=$LDFLAGS" >> $config_host_mak
 echo "CC=$cc" >> $config_host_mak
+if test -n "$cxx" ; then
+  echo "CXX=$cxx" >> $config_host_mak
+fi
 echo "BUILD_CFLAGS=$BUILD_CFLAGS $CFLAGS" >> $config_host_mak
 echo "INSTALL_PREFIX=$prefix" >> $config_host_mak
 

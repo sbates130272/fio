@@ -2345,6 +2345,13 @@ I/O engine
 			:option:`iomem` must not be `cudamalloc`. This ioengine defines
 			engine specific options.
 
+		**rocm-xio**
+			I/O engine using the ROCm rocm-xio library to run GPU-initiated NVMe
+			I/O against a target controller from AMD GPUs. This engine maps fio
+			jobs onto the rocm-xio `nvme-ep` endpoint and supports queue count,
+			queue length, batch submission, namespace selection, and optional
+			data verification.
+
 		**dfs**
 			I/O engine supporting asynchronous read and write operations to the
 			DAOS File System (DFS) via libdfs.
@@ -3233,6 +3240,65 @@ with the caveat that when used on the command line, they must come after the
 		to transfer data between RAM and the GPUs. Data is copied from
 		GPU to RAM before a write and copied from RAM to GPU after a
 		read. :option:`verify` does not affect use of cudaMemcpy.
+
+.. option:: rocm_xio_controller=str : [rocm-xio]
+
+	NVMe controller path used by rocm-xio (for example,
+	:file:`/dev/nvme0`). This option is required.
+
+.. option:: rocm_xio_queue_id=int : [rocm-xio]
+
+	Last NVMe queue ID to use. A value of 0 enables auto-detection of the last
+	available queue ID.
+
+.. option:: rocm_xio_queue_length=int : [rocm-xio]
+
+	NVMe queue length in entries. Must be a power of two between 1 and 65535.
+	Default is 1024.
+
+.. option:: rocm_xio_num_queues=int : [rocm-xio]
+
+	Number of independent NVMe queues to run. Each queue is driven by a separate
+	rocm-xio kernel launch on its own HIP stream. Default is 1.
+
+.. option:: rocm_xio_namespace=int : [rocm-xio]
+
+	NVMe namespace ID used for I/O. Default is 1.
+
+.. option:: rocm_xio_lbas_per_io=int : [rocm-xio]
+
+	Number of logical blocks per command issued by rocm-xio. Default is 1.
+
+.. option:: rocm_xio_batch_size=int : [rocm-xio]
+
+	Number of SQEs prepared per doorbell ring. A value of 1 is sequential mode,
+	0 means submit all eligible I/O in one batch, and values greater than 1
+	enable wavefront-style cooperative batching.
+
+.. option:: rocm_xio_data_buffer_size=int : [rocm-xio]
+
+	Size in bytes of per-queue read/write buffers allocated by rocm-xio.
+	Default is 1048576.
+
+.. option:: rocm_xio_access_pattern=str : [rocm-xio]
+
+	Access pattern used by rocm-xio. Valid values are **random** and
+	**sequential**.
+
+.. option:: rocm_xio_verify=bool : [rocm-xio]
+
+	Enable rocm-xio endpoint data-pattern verification after read-back. This
+	requires both reads and writes and is incompatible with infinite mode.
+
+.. option:: rocm_xio_lfsr_seed=int : [rocm-xio]
+
+	LFSR seed used by rocm-xio data-pattern generation. A value of 0 derives the
+	seed from the LBA.
+
+.. option:: rocm_xio_pci_mmio_bridge=bool : [rocm-xio]
+
+	Enable rocm-xio PCI MMIO bridge mode for doorbell writes instead of direct
+	BAR0 mapping.
 
 .. option:: nfs_url=str : [nfs]
 

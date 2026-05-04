@@ -2159,6 +2159,11 @@ flexibility to access GNU/Linux Kernel NVMe driver via libaio, IOCTLs, io_uring,
 the SPDK NVMe driver, or your own custom NVMe driver. The xnvme engine includes
 engine specific options. (See \fIhttps://xnvme.io/\fR).
 .TP
+.B rocm-xio
+I/O engine using ROCm XIO for GPU-initiated NVMe I/O from AMD GPUs. The
+rocm-xio engine forwards workload execution to the rocm-xio nvme-ep endpoint and
+requires a rocm-xio installation with userspace library support.
+.TP
 .B libblkio
 Use the libblkio library (\fIhttps://gitlab.com/libblkio/libblkio\fR). The
 specific driver to use must be set using \fBlibblkio_driver\fR. If
@@ -2960,6 +2965,32 @@ from RAM to GPU after a read. \fBverify\fR does not affect
 the use of cudaMemcpy.
 .RE
 .RE
+.TP
+.BI (rocm-xio)rocm_xio_controller\fR=\fPstr
+NVMe controller path used by rocm-xio (e.g. \fI/dev/nvme0\fR). Required.
+.TP
+.BI (rocm-xio)rocm_xio_queue_id\fR=\fPint
+Highest NVMe I/O queue identifier to use. 0 auto-detects the last available
+I/O queue.
+.TP
+.BI (rocm-xio)rocm_xio_queue_length\fR=\fPint
+Queue length in entries. Must be a power of two.
+.TP
+.BI (rocm-xio)rocm_xio_num_queues\fR=\fPint
+Number of independent NVMe I/O queues to create.
+.TP
+.BI (rocm-xio)rocm_xio_namespace\fR=\fPint
+NVMe namespace identifier. Must be greater than zero.
+.TP
+.BI (rocm-xio)rocm_xio_batch_size\fR=\fPint
+SQEs submitted per doorbell ring. 1 is sequential, 0 means as many as
+allowed by queue depth.
+.TP
+.BI (rocm-xio)rocm_xio_memory_mode\fR=\fPint
+Memory mode bitmask passed to rocm-xio (default 0).
+.TP
+.BI (rocm-xio)rocm_xio_pci_mmio_bridge
+Enable PCI MMIO bridge doorbell routing.
 .TP
 .BI (dfs)pool
 Specify the label or UUID of the DAOS pool to connect to.
