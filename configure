@@ -182,6 +182,7 @@ pmem="no"
 cuda="no"
 cuda13="no"
 libcufile="no"
+rocm_xio=""
 disable_lex=""
 disable_pmem="no"
 disable_native="no"
@@ -255,6 +256,10 @@ for opt do
   ;;
   --enable-libcufile) libcufile="yes"
   ;;
+  --enable-rocm-xio) rocm_xio="yes"
+  ;;
+  --disable-rocm-xio) rocm_xio="no"
+  ;;
   --disable-native) disable_native="yes"
   ;;
   --with-ime=*) ime_path="$optarg"
@@ -326,6 +331,8 @@ if test "$show_help" = "yes" ; then
   echo "--disable-optimizations Don't enable compiler optimizations"
   echo "--enable-cuda           Enable GPUDirect RDMA support"
   echo "--enable-libcufile      Enable GPUDirect Storage cuFile support"
+  echo "--enable-rocm-xio       Enable ROCm XIO support"
+  echo "--disable-rocm-xio      Disable ROCm XIO support even if found"
   echo "--disable-native        Don't build for native host"
   echo "--with-ime=             Install path for DDN's Infinite Memory Engine"
   echo "--enable-libiscsi       Enable iscsi support"
@@ -2856,6 +2863,29 @@ fi
 print_config "libcufile" "$libcufile"
 
 ##########################################
+# Check if we have rocm-xio
+if test "$rocm_xio" != "no" ; then
+cat > $TMPC << EOF
+#include <xio.h>
+#include <nvme-ep.h>
+#include <hip/hip_runtime.h>
+int main(void)
+{
+  xio::XioEndpointConfig cfg;
+  auto ep = xio::createEndpoint("nvme-ep");
+  return ep ? 0 : 1;
+}
+EOF
+  if compile_prog "" "-lrocm-xio -lamdhip64 -lhsa-runtime64 -ldl" "rocm-xio"; then
+    rocm_xio="yes"
+    rocm_xio_libs="-lrocm-xio -lamdhip64 -lhsa-runtime64 -ldl"
+  else
+    rocm_xio="no"
+  fi
+fi
+print_config "rocm-xio engine" "$rocm_xio"
+
+##########################################
 # cuda 13 probe
 if test "$cuda" != "no" || test "$libcufile" != "no"; then
 cat > $TMPC << EOF
@@ -3441,6 +3471,10 @@ if test "$libblkio" = "yes" ; then
   output_sym "CONFIG_LIBBLKIO"
   echo "LIBBLKIO_CFLAGS=$libblkio_cflags" >> $config_host_mak
   echo "LIBBLKIO_LIBS=$libblkio_libs" >> $config_host_mak
+fi
+if test "$rocm_xio" = "yes" ; then
+  output_sym "CONFIG_ROCM_XIO"
+  echo "ROCM_XIO_LIBS=$rocm_xio_libs" >> $config_host_mak
 fi
 if test "$dynamic_engines" = "yes" ; then
   output_sym "CONFIG_DYNAMIC_ENGINES"

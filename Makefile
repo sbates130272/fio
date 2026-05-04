@@ -121,6 +121,12 @@ endif
 ifdef CONFIG_LIBCUFILE
   SOURCE += engines/libcufile.c
 endif
+ifdef CONFIG_ROCM_XIO
+  rocm_xio_SRCS = engines/rocm_xio.c engines/rocm_xio_shim.cpp
+  rocm_xio_LIBS = $(ROCM_XIO_LIBS)
+  rocm_xio_CFLAGS = $(ROCM_XIO_CFLAGS)
+  ENGINES += rocm_xio
+endif
 ifdef CONFIG_LINUX_SPLICE
   SOURCE += engines/splice.c
 endif
@@ -286,10 +292,11 @@ endif
 ifdef CONFIG_DYNAMIC_ENGINES
  DYNAMIC_ENGS := $(ENGINES)
 define engine_template =
-$(1)_OBJS := $$($(1)_SRCS:.c=.o)
+$(1)_OBJS := $$(patsubst %.c,%.o,$$($(1)_SRCS))
+$(1)_OBJS := $$(patsubst %.cpp,%.o,$$($(1)_OBJS))
 $$($(1)_OBJS): CFLAGS := -fPIC $$($(1)_CFLAGS) $(CFLAGS)
 engines/fio-$(1).so: $$($(1)_OBJS)
-	$$(QUIET_LINK)$(CC) $(LDFLAGS) -shared -rdynamic -fPIC -Wl,-soname,fio-$(1).so.1 -o $$@ $$< $$($(1)_LIBS)
+	$$(QUIET_LINK)$$(if $$(filter %.cpp,$$($(1)_SRCS)),$$(CXX),$(CC)) $(LDFLAGS) -shared -rdynamic -fPIC -Wl,-soname,fio-$(1).so.1 -o $$@ $$($(1)_OBJS) $$($(1)_LIBS)
 ENGS_OBJS += engines/fio-$(1).so
 endef
 else # !CONFIG_DYNAMIC_ENGINES
@@ -309,6 +316,7 @@ override CFLAGS := -DFIO_VERSION='"$(FIO_VERSION)"' $(FIO_CFLAGS) $(CFLAGS)
 $(foreach eng,$(ENGINES),$(eval $(call engine_template,$(eng))))
 
 OBJS := $(SOURCE:.c=.o)
+OBJS := $(OBJS:.cpp=.o)
 
 FIO_OBJS = $(OBJS) fio.o
 
@@ -505,6 +513,22 @@ all: $(PROGS) $(T_TEST_PROGS) $(UT_PROGS) $(SCRIPTS) $(ENGS_OBJS) FORCE
 	@mkdir -p $(dir $@)
 	$(QUIET_CC)$(CC) -o $@ $(CFLAGS) $(CPPFLAGS) -c $<
 	@$(CC) -MM $(CFLAGS) $(CPPFLAGS) $(SRCDIR)/$*.c > $*.d
+	@mv -f $*.d $*.d.tmp
+	@sed -e 's|.*:|$*.o:|' < $*.d.tmp > $*.d
+	@if type -p fmt >/dev/null 2>&1; then				\
+		sed -e 's/.*://' -e 's/\\$$//' < $*.d.tmp | fmt -w 1 |	\
+		sed -e 's/^ *//' -e 's/$$/:/' >> $*.d;			\
+	else								\
+		sed -e 's/.*://' -e 's/\\$$//' < $*.d.tmp |		\
+		tr -cs "[:graph:]" "\n" |				\
+		sed -e 's/^ *//' -e '/^$$/ d' -e 's/$$/:/' >> $*.d;	\
+	fi
+	@rm -f $*.d.tmp
+
+%.o : %.cpp
+	@mkdir -p $(dir $@)
+	$(QUIET_CC)$(CXX) -o $@ $(CFLAGS) $(CPPFLAGS) -c $<
+	@$(CXX) -MM $(CFLAGS) $(CPPFLAGS) $(SRCDIR)/$*.cpp > $*.d
 	@mv -f $*.d $*.d.tmp
 	@sed -e 's|.*:|$*.o:|' < $*.d.tmp > $*.d
 	@if type -p fmt >/dev/null 2>&1; then				\
