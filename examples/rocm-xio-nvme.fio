@@ -1,0 +1,34 @@
+; Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+;
+; SPDX-License-Identifier: GPL-2.0-only
+;
+
+; Example ROCm XIO NVMe job.
+;
+; Prerequisites:
+; - rocm-xio is installed, including xio-tester and the rocm-xio kernel module.
+; - The AMD GPU in the target system can access the target NVMe controller.
+; - The filename or rocm_xio_controller points at an NVMe controller device
+;   such as /dev/nvme0, not a namespace block device such as /dev/nvme0n1.
+
+[global]
+ioengine=rocm-xio
+filename=/dev/nvme0
+direct=1
+rw=randread
+bs=4k
+size=1g
+iodepth=1
+verify=0
+
+; rocm-xio/xio-tester options.
+rocm_xio_tester=xio-tester
+rocm_xio_nsid=1
+rocm_xio_lba_size=512
+rocm_xio_queue_id=0
+rocm_xio_queue_length=64
+rocm_xio_num_queues=1
+rocm_xio_batch_size=1
+rocm_xio_memory_mode=0
+
+[gpu-nvme]

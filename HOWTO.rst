@@ -2345,6 +2345,14 @@ I/O engine
 			:option:`iomem` must not be `cudamalloc`. This ioengine defines
 			engine specific options.
 
+		**rocm-xio**
+			I/O engine that drives the ROCm XIO ``nvme-ep`` endpoint through
+			``xio-tester`` so an AMD GPU in the target system performs NVMe
+			I/O. Each fio I/O is translated to one GPU-initiated NVMe command
+			at the fio offset. ``xio-tester`` and the ROCm XIO kernel module
+			must be installed and configured on the target. fio verification is
+			not supported because ROCm XIO owns the GPU data buffers.
+
 		**dfs**
 			I/O engine supporting asynchronous read and write operations to the
 			DAOS File System (DFS) via libdfs.
@@ -3233,6 +3241,65 @@ with the caveat that when used on the command line, they must come after the
 		to transfer data between RAM and the GPUs. Data is copied from
 		GPU to RAM before a write and copied from RAM to GPU after a
 		read. :option:`verify` does not affect use of cudaMemcpy.
+
+.. option:: rocm_xio_tester=str : [rocm-xio]
+
+	Path to the ``xio-tester`` executable from the ROCm XIO project. The
+	default is ``xio-tester`` and relies on ``PATH``.
+
+.. option:: rocm_xio_controller=str : [rocm-xio]
+
+	NVMe controller device passed to ``xio-tester``. If this option is not
+	set, fio uses the job ``filename`` as the controller path.
+
+.. option:: rocm_xio_nsid=int : [rocm-xio]
+
+	NVMe namespace ID. Default: 1.
+
+.. option:: rocm_xio_lba_size=int : [rocm-xio]
+
+	LBA size used to translate fio offsets and block sizes to NVMe LBAs.
+	Default: 512. The value must match the namespace format reported by the
+	controller.
+
+.. option:: rocm_xio_queue_id=int : [rocm-xio]
+
+	NVMe I/O queue ID used by ROCm XIO, or 0 to let ROCm XIO auto-detect the
+	last available I/O queue. Default: 0.
+
+.. option:: rocm_xio_queue_length=int : [rocm-xio]
+
+	NVMe queue length in entries. Default: 64.
+
+.. option:: rocm_xio_num_queues=int : [rocm-xio]
+
+	Number of independent ROCm XIO NVMe queues. Default: 1.
+
+.. option:: rocm_xio_batch_size=int : [rocm-xio]
+
+	Number of SQEs submitted per ROCm XIO doorbell ring. Default: 1.
+
+.. option:: rocm_xio_memory_mode=int : [rocm-xio]
+
+	ROCm XIO memory mode bitmask passed as ``--memory-mode`` to
+	``xio-tester``. Default: 0.
+
+.. option:: rocm_xio_pci_mmio_bridge : [rocm-xio]
+
+	Use the ROCm XIO PCI MMIO bridge path for NVMe doorbells.
+
+.. option:: rocm_xio_verbose : [rocm-xio]
+
+	Pass ``-v`` to ``xio-tester`` and preserve its standard output.
+
+.. option:: rocm_xio_lfsr_seed=int : [rocm-xio]
+
+	LFSR seed for ROCm XIO write-pattern generation. Default: 0.
+
+.. option:: rocm_xio_data_buffer_size=int : [rocm-xio]
+
+	Data buffer size passed to ROCm XIO. The buffer must be large enough for
+	the fio block size. Default: 1048576.
 
 .. option:: nfs_url=str : [nfs]
 

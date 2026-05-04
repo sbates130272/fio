@@ -2140,6 +2140,14 @@ I/O without transferring buffers between user-space and the kernel,
 unless \fBverify\fR is set or \fBcuda_io\fR is \fBposix\fR. \fBiomem\fR must
 not be \fBcudamalloc\fR. This ioengine defines engine specific options.
 .TP
+.B rocm-xio
+I/O engine that drives the ROCm XIO \fBnvme-ep\fR endpoint through
+\fBxio-tester\fR so an AMD GPU in the target system performs NVMe I/O.
+Each fio I/O is translated to one GPU-initiated NVMe command at the fio
+offset. \fBxio-tester\fR and the ROCm XIO kernel module must be installed
+and configured on the target. fio verification is not supported because
+ROCm XIO owns the GPU data buffers.
+.TP
 .B dfs
 I/O engine supporting asynchronous read and write operations to the DAOS File
 System (DFS) via libdfs.
@@ -2960,6 +2968,51 @@ from RAM to GPU after a read. \fBverify\fR does not affect
 the use of cudaMemcpy.
 .RE
 .RE
+.TP
+.BI (rocm-xio)rocm_xio_tester\fR=\fPstr
+Path to the \fBxio-tester\fR executable from the ROCm XIO project. The default
+is \fBxio-tester\fR and relies on \fBPATH\fR.
+.TP
+.BI (rocm-xio)rocm_xio_controller\fR=\fPstr
+NVMe controller device passed to \fBxio-tester\fR. If this option is not set,
+fio uses the job \fBfilename\fR as the controller path.
+.TP
+.BI (rocm-xio)rocm_xio_nsid\fR=\fPint
+NVMe namespace ID. Default: 1.
+.TP
+.BI (rocm-xio)rocm_xio_lba_size\fR=\fPint
+LBA size used to translate fio offsets and block sizes to NVMe LBAs. Default:
+512. The value must match the namespace format reported by the controller.
+.TP
+.BI (rocm-xio)rocm_xio_queue_id\fR=\fPint
+NVMe I/O queue ID used by ROCm XIO, or 0 to let ROCm XIO auto-detect the last
+available I/O queue. Default: 0.
+.TP
+.BI (rocm-xio)rocm_xio_queue_length\fR=\fPint
+NVMe queue length in entries. Default: 64.
+.TP
+.BI (rocm-xio)rocm_xio_num_queues\fR=\fPint
+Number of independent ROCm XIO NVMe queues. Default: 1.
+.TP
+.BI (rocm-xio)rocm_xio_batch_size\fR=\fPint
+Number of SQEs submitted per ROCm XIO doorbell ring. Default: 1.
+.TP
+.BI (rocm-xio)rocm_xio_memory_mode\fR=\fPint
+ROCm XIO memory mode bitmask passed as \fB--memory-mode\fR to
+\fBxio-tester\fR. Default: 0.
+.TP
+.BI (rocm-xio)rocm_xio_pci_mmio_bridge
+Use the ROCm XIO PCI MMIO bridge path for NVMe doorbells.
+.TP
+.BI (rocm-xio)rocm_xio_verbose
+Pass \fB-v\fR to \fBxio-tester\fR and preserve its standard output.
+.TP
+.BI (rocm-xio)rocm_xio_lfsr_seed\fR=\fPint
+LFSR seed for ROCm XIO write-pattern generation. Default: 0.
+.TP
+.BI (rocm-xio)rocm_xio_data_buffer_size\fR=\fPint
+Data buffer size passed to ROCm XIO. The buffer must be large enough for the
+fio block size. Default: 1048576.
 .TP
 .BI (dfs)pool
 Specify the label or UUID of the DAOS pool to connect to.
