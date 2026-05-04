@@ -2345,6 +2345,12 @@ I/O engine
 			:option:`iomem` must not be `cudamalloc`. This ioengine defines
 			engine specific options.
 
+		**rocm_xio**
+			I/O engine supporting synchronous NVMe I/O submission through the
+			ROCm XIO (rocm-xio) userspace stack. This engine is intended for
+			AMD GPU-initiated NVMe paths where queue setup and command
+			submission are driven by rocm-xio.
+
 		**dfs**
 			I/O engine supporting asynchronous read and write operations to the
 			DAOS File System (DFS) via libdfs.
@@ -3233,6 +3239,50 @@ with the caveat that when used on the command line, they must come after the
 		to transfer data between RAM and the GPUs. Data is copied from
 		GPU to RAM before a write and copied from RAM to GPU after a
 		read. :option:`verify` does not affect use of cudaMemcpy.
+
+.. option:: rocm_xio_controller=str : [rocm_xio]
+
+	Path to the NVMe controller node used by rocm-xio, for example
+	:file:`/dev/nvme0`.
+
+.. option:: rocm_xio_gpu_id=int : [rocm_xio]
+
+	HIP GPU device id used for rocm-xio execution. Default is -1, which
+	keeps the current HIP device.
+
+.. option:: rocm_xio_queue_id=int : [rocm_xio]
+
+	NVMe queue id for rocm-xio queue creation. Default is 0, which enables
+	rocm-xio automatic queue id selection.
+
+.. option:: rocm_xio_queue_length=int : [rocm_xio]
+
+	Queue depth (entries) used for the rocm-xio NVMe SQ/CQ pair.
+
+.. option:: rocm_xio_nsid=int : [rocm_xio]
+
+	NVMe namespace id used for I/O commands. Default is 1.
+
+.. option:: rocm_xio_lfsr_seed=int : [rocm_xio]
+
+	LFSR seed passed into rocm-xio data pattern generation.
+
+.. option:: rocm_xio_batch_size=int : [rocm_xio]
+
+	SQEs grouped per doorbell ring in rocm-xio. Default is 1.
+
+.. option:: rocm_xio_memory_mode=int : [rocm_xio]
+
+	Raw rocm-xio memory mode bitmap used when allocating queue and data
+	buffers.
+
+.. option:: rocm_xio_pci_mmio_bridge=bool : [rocm_xio]
+
+	Enable rocm-xio PCI MMIO bridge doorbell mode.
+
+.. option:: rocm_xio_verbose=bool : [rocm_xio]
+
+	Enable verbose rocm-xio logging.
 
 .. option:: nfs_url=str : [nfs]
 
