@@ -73,6 +73,7 @@ enum opt_category_group {
 	__FIO_OPT_G_WINDOWSAIO,
 	__FIO_OPT_G_XNVME,
 	__FIO_OPT_G_LIBBLKIO,
+	__FIO_OPT_G_ROCM_XIO,
 
 	FIO_OPT_G_RATE		= (1ULL << __FIO_OPT_G_RATE),
 	FIO_OPT_G_ZONE		= (1ULL << __FIO_OPT_G_ZONE),
@@ -119,6 +120,7 @@ enum opt_category_group {
 	FIO_OPT_G_DFS		= (1ULL << __FIO_OPT_G_DFS),
 	FIO_OPT_G_WINDOWSAIO	= (1ULL << __FIO_OPT_G_WINDOWSAIO),
 	FIO_OPT_G_XNVME         = (1ULL << __FIO_OPT_G_XNVME),
+	FIO_OPT_G_ROCM_XIO      = (1ULL << __FIO_OPT_G_ROCM_XIO),
 	FIO_OPT_G_LIBBLKIO	= (1ULL << __FIO_OPT_G_LIBBLKIO),
 };
 

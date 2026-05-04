@@ -309,6 +309,11 @@ override CFLAGS := -DFIO_VERSION='"$(FIO_VERSION)"' $(FIO_CFLAGS) $(CFLAGS)
 $(foreach eng,$(ENGINES),$(eval $(call engine_template,$(eng))))
 
 OBJS := $(SOURCE:.c=.o)
+ifdef CONFIG_ROCM_XIO
+ROCM_XIO_OBJ := engines/rocm-xio.o
+OBJS += $(ROCM_XIO_OBJ)
+LIBS += $(ROCM_XIO_LIBS)
+endif
 
 FIO_OBJS = $(OBJS) fio.o
 
@@ -321,6 +326,12 @@ GFIO_OBJS += lex.yy.o y.tab.o
 endif
 
 -include $(OBJS:.o=.d) $(T_OBJS:.o=.d) $(UT_OBJS:.o=.d)
+
+ifdef CONFIG_ROCM_XIO
+ROCM_XIO_CXX ?= hipcc
+engines/rocm-xio.o: engines/rocm-xio.cpp
+	$(QUIET_CC)$(ROCM_XIO_CXX) -std=c++17 $(CPPFLAGS) $(ROCM_XIO_CFLAGS) $(CFLAGS) -fno-rtti -fno-exceptions -fgpu-rdc -I. -I$(SRCDIR) -c -o $@ $<
+endif
 
 T_SMALLOC_OBJS = t/stest.o
 T_SMALLOC_OBJS += gettime.o fio_sem.o pshared.o smalloc.o t/log.o t/debug.o \
@@ -600,7 +611,18 @@ t/ieee754: $(T_IEEE_OBJS)
 	$(QUIET_LINK)$(CC) $(LDFLAGS) -o $@ $(T_IEEE_OBJS) $(LIBS)
 
 fio: $(FIO_OBJS)
+ifdef CONFIG_ROCM_XIO
+	$(QUIET_LINK)$(ROCM_XIO_CXX) $(LDFLAGS) -fgpu-rdc -o $@ $(FIO_OBJS) $(LIBS) $(HDFSLIB)
+else
 	$(QUIET_LINK)$(CC) $(LDFLAGS) -o $@ $(FIO_OBJS) $(LIBS) $(HDFSLIB)
+endif
+
+gfio: $(GFIO_OBJS)
+ifdef CONFIG_ROCM_XIO
+	$(QUIET_LINK)$(ROCM_XIO_CXX) $(filter-out -static, $(LDFLAGS)) -fgpu-rdc -o gfio $(GFIO_OBJS) $(LIBS) $(GFIO_LIBS) $(GTK_LDFLAGS) $(HDFSLIB)
+else
+	$(QUIET_LINK)$(CC) $(filter-out -static, $(LDFLAGS)) -o gfio $(GFIO_OBJS) $(LIBS) $(GFIO_LIBS) $(GTK_LDFLAGS) $(HDFSLIB)
+endif
 
 t/fuzz/fuzz_parseini: $(T_FUZZ_OBJS)
 ifndef LIB_FUZZING_ENGINE
@@ -608,9 +630,6 @@ ifndef LIB_FUZZING_ENGINE
 else
 	$(QUIET_LINK)$(CXX) $(LDFLAGS) -o $@ $(T_FUZZ_OBJS) $(LIB_FUZZING_ENGINE) $(LIBS) $(HDFSLIB)
 endif
-
-gfio: $(GFIO_OBJS)
-	$(QUIET_LINK)$(CC) $(filter-out -static, $(LDFLAGS)) -o gfio $(GFIO_OBJS) $(LIBS) $(GFIO_LIBS) $(GTK_LDFLAGS) $(HDFSLIB)
 
 t/fio-genzipf: $(T_ZIPF_OBJS)
 	$(QUIET_LINK)$(CC) $(LDFLAGS) -o $@ $(T_ZIPF_OBJS) $(LIBS)

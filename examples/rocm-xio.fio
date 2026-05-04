@@ -1,0 +1,23 @@
+; Example: GPU-initiated NVMe via rocm-xio (requires --enable-rocm-xio build,
+; rocm-xio kernel module loaded, and matching queue id per job).
+;
+; export HSA_FORCE_FINE_GRAIN_PCIE=1
+; sudo fio examples/rocm-xio.fio
+
+[global]
+ioengine=rocm-xio
+thread=1
+group_reporting=1
+direct=1
+rw=randread
+bs=128k
+iodepth=1
+time_based
+runtime=10
+filename=/dev/nvme0n1
+
+[job1]
+rocm_xio_gpu=0
+rocm_xio_queue_id=1
+rocm_xio_queue_depth=64
+rocm_xio_device_mem=1

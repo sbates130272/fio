@@ -186,6 +186,10 @@ static const struct opt_group fio_opt_cat_groups[] = {
 		.mask	= FIO_OPT_G_NFS,
 	},
 	{
+		.name	= "ROCm XIO I/O engine", /* rocm-xio */
+		.mask	= FIO_OPT_G_ROCM_XIO,
+	},
+	{
 		.name	= NULL,
 	},
 };

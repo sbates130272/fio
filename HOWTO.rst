@@ -2379,6 +2379,15 @@ I/O engine
 			several instances to access the same device or file
 			simultaneously, but allow it for threads.
 
+		**rocm-xio**
+			GPU-initiated read/write to a local NVMe namespace via AMD
+			`rocm-xio` (requires ROCm, `librocm-xio`, the `rocm-xio`
+			kernel module, and building fio with ``--enable-rocm-xio``).
+			Use a namespace device such as ``/dev/nvme0n1`` as
+			:option:`filename`. Each I/O is run as a short HIP kernel
+			(high launch overhead compared to `xio-tester`). See
+			:file:`examples/rocm-xio.fio` and ``fio --enghelp=rocm-xio``.
+
 		**page_fault**
 			I/O engine that uses an mmap region to simulate data transfer by
 			allocating anonymous memory and copying data on read/write to
