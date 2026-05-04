@@ -2345,6 +2345,13 @@ I/O engine
 			:option:`iomem` must not be `cudamalloc`. This ioengine defines
 			engine specific options.
 
+		**rocm-xio**
+			I/O engine supporting GPU-initiated NVMe I/O via ROCm-XIO. This
+			engine issues reads and writes from AMD GPUs to an NVMe controller
+			using the rocm-xio nvme endpoint. The filename must point to an NVMe
+			controller character device (for example ``/dev/nvme0``). This
+			ioengine defines engine specific options.
+
 		**dfs**
 			I/O engine supporting asynchronous read and write operations to the
 			DAOS File System (DFS) via libdfs.
@@ -3233,6 +3240,62 @@ with the caveat that when used on the command line, they must come after the
 		to transfer data between RAM and the GPUs. Data is copied from
 		GPU to RAM before a write and copied from RAM to GPU after a
 		read. :option:`verify` does not affect use of cudaMemcpy.
+
+.. option:: rocm_xio_controller=str : [rocm-xio]
+
+	Override the NVMe controller path passed to rocm-xio. If omitted, fio uses
+	the job filename (for example ``filename=/dev/nvme0``).
+
+.. option:: rocm_xio_access_pattern=str : [rocm-xio]
+
+	Access pattern for rocm-xio operations.
+
+	**random**
+		Issue random LBAs from rocm-xio's NVMe endpoint selector.
+	**sequential**
+		Issue LBAs sequentially from :option:`rocm_xio_base_lba`.
+
+.. option:: rocm_xio_queue_id=int : [rocm-xio]
+
+	NVMe I/O queue identifier to use for the rocm-xio endpoint. Default is 0
+	(auto-detect).
+
+.. option:: rocm_xio_queue_length=int : [rocm-xio]
+
+	NVMe queue depth in entries. Must be a power of two. Default is 64.
+
+.. option:: rocm_xio_num_queues=int : [rocm-xio]
+
+	Number of queue pairs requested from rocm-xio. Default is 1.
+
+.. option:: rocm_xio_nsid=int : [rocm-xio]
+
+	NVMe namespace identifier. Default is 1.
+
+.. option:: rocm_xio_memory_mode=int : [rocm-xio]
+
+	rocm-xio memory mode bitmask (0-15) controlling queue and buffer placement.
+	Default is 0.
+
+.. option:: rocm_xio_base_lba=int : [rocm-xio]
+
+	Starting LBA for rocm-xio I/O. fio adds each io_u byte offset on top of this
+	value. Default is 0.
+
+.. option:: rocm_xio_lbas_per_io=int : [rocm-xio]
+
+	Default number of LBAs per operation before fio maps a specific io_u length.
+	Default is 1.
+
+.. option:: rocm_xio_batch_size=int : [rocm-xio]
+
+	Number of SQEs to submit before ringing the doorbell. 1 issues one I/O per
+	doorbell. 0 means "submit as many as possible" for the run configuration.
+	Default is 1.
+
+.. option:: rocm_xio_pci_mmio_bridge=bool : [rocm-xio]
+
+	Enable rocm-xio PCI MMIO bridge doorbell routing mode. Default is false.
 
 .. option:: nfs_url=str : [nfs]
 

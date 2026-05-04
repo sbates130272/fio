@@ -2140,6 +2140,12 @@ I/O without transferring buffers between user-space and the kernel,
 unless \fBverify\fR is set or \fBcuda_io\fR is \fBposix\fR. \fBiomem\fR must
 not be \fBcudamalloc\fR. This ioengine defines engine specific options.
 .TP
+.B rocm-xio
+I/O engine supporting GPU-initiated NVMe I/O through ROCm-XIO. This
+engine drives rocm-xio's nvme-ep path from fio jobs and is intended for
+character NVMe controller paths (for example \fB/dev/nvme0\fR) with
+ROCm-XIO kernel module support. One fio worker maps to one ROCm-XIO queue.
+.TP
 .B dfs
 I/O engine supporting asynchronous read and write operations to the DAOS File
 System (DFS) via libdfs.
@@ -2960,6 +2966,53 @@ from RAM to GPU after a read. \fBverify\fR does not affect
 the use of cudaMemcpy.
 .RE
 .RE
+.TP
+.BI (rocm-xio)rocm_xio_controller\fR=\fPstr
+NVMe controller character device path (for example \fI/dev/nvme0\fR). If not
+set, fio filename is used.
+.TP
+.BI (rocm-xio)rocm_xio_queue_id\fR=\fPint
+Queue identifier to use for the ROCm-XIO NVMe endpoint. Defaults to 1.
+.TP
+.BI (rocm-xio)rocm_xio_queue_length\fR=\fPint
+Queue depth in entries for ROCm-XIO queue creation. Must be a power of two.
+Defaults to 64.
+.TP
+.BI (rocm-xio)rocm_xio_nsid\fR=\fPint
+NVMe namespace identifier used by ROCm-XIO. Defaults to 1.
+.TP
+.BI (rocm-xio)rocm_xio_num_queues\fR=\fPint
+Number of queue pairs passed to ROCm-XIO nvme-ep. Defaults to 1.
+.TP
+.BI (rocm-xio)rocm_xio_batch_size\fR=\fPint
+Batch size forwarded to ROCm-XIO nvme-ep. Value 1 issues one SQE per doorbell.
+Value 0 lets ROCm-XIO choose the all-at-once mode. Default is 1.
+.TP
+.BI (rocm-xio)rocm_xio_lbas_per_io\fR=\fPint
+Number of logical blocks per ROCm-XIO operation. Defaults to 1.
+.TP
+.BI (rocm-xio)rocm_xio_memory_mode\fR=\fPint
+ROCm-XIO memory mode bitfield (0-15) controlling queue and data placement.
+Defaults to 0.
+.TP
+.BI (rocm-xio)rocm_xio_access_pattern\fR=\fPstr
+Access pattern given to ROCm-XIO. Supported values are:
+.RS
+.RS
+.TP
+.B random (default)
+Issue random LBA access through ROCm-XIO hashing.
+.TP
+.B sequential
+Issue sequential LBAs from base LBA onward.
+.RE
+.RE
+.TP
+.BI (rocm-xio)rocm_xio_base_lba\fR=\fPint
+Starting LBA for ROCm-XIO operations. Defaults to 0.
+.TP
+.BI (rocm-xio)rocm_xio_pci_mmio_bridge\fR=\fPbool
+Enable ROCm-XIO PCI MMIO bridge doorbell path. Defaults to 0.
 .TP
 .BI (dfs)pool
 Specify the label or UUID of the DAOS pool to connect to.

@@ -182,6 +182,9 @@ pmem="no"
 cuda="no"
 cuda13="no"
 libcufile="no"
+rocm_xio="no"
+rocm_xio_cflags=""
+rocm_xio_libs=""
 disable_lex=""
 disable_pmem="no"
 disable_native="no"
@@ -255,6 +258,8 @@ for opt do
   ;;
   --enable-libcufile) libcufile="yes"
   ;;
+  --enable-rocm-xio) rocm_xio="yes"
+  ;;
   --disable-native) disable_native="yes"
   ;;
   --with-ime=*) ime_path="$optarg"
@@ -326,6 +331,7 @@ if test "$show_help" = "yes" ; then
   echo "--disable-optimizations Don't enable compiler optimizations"
   echo "--enable-cuda           Enable GPUDirect RDMA support"
   echo "--enable-libcufile      Enable GPUDirect Storage cuFile support"
+  echo "--enable-rocm-xio       Enable ROCm-XIO NVMe ioengine support"
   echo "--disable-native        Don't build for native host"
   echo "--with-ime=             Install path for DDN's Infinite Memory Engine"
   echo "--enable-libiscsi       Enable iscsi support"
@@ -2856,6 +2862,33 @@ fi
 print_config "libcufile" "$libcufile"
 
 ##########################################
+# rocm-xio probe
+if test "$rocm_xio" != "no" ; then
+cat > $TMPC << EOF
+#include <xio.h>
+
+int main(int argc, char **argv)
+{
+  (void) argc;
+  (void) argv;
+  xio::printDeviceInfo();
+  return 0;
+}
+EOF
+  if compile_prog "-x c++ -std=c++17 -I/opt/rocm/include/rocm-xio -I/opt/rocm/include" "-lrocm-xio -lstdc++" "rocm_xio"; then
+    rocm_xio="yes"
+    rocm_xio_cflags="-DHAVE_ROCM_XIO -I/opt/rocm/include/rocm-xio -I/opt/rocm/include"
+    rocm_xio_libs="-lrocm-xio -lstdc++"
+  else
+    if test "$rocm_xio" = "yes" ; then
+      feature_not_found "rocm-xio" ""
+    fi
+    rocm_xio="no"
+  fi
+fi
+print_config "rocm-xio" "$rocm_xio"
+
+##########################################
 # cuda 13 probe
 if test "$cuda" != "no" || test "$libcufile" != "no"; then
 cat > $TMPC << EOF
@@ -3373,6 +3406,9 @@ fi
 if test "$libcufile" = "yes" ; then
   output_sym "CONFIG_LIBCUFILE"
 fi
+if test "$rocm_xio" = "yes" ; then
+  output_sym "CONFIG_ROCM_XIO"
+fi
 if test "$cuda13" = "yes" ; then
   output_sym "CONFIG_CUDA13"
 fi
@@ -3489,6 +3525,9 @@ echo "GFIO_LIBS+=$GFIO_LIBS" >> $config_host_mak
 echo "CFLAGS+=$CFLAGS" >> $config_host_mak
 echo "LDFLAGS+=$LDFLAGS" >> $config_host_mak
 echo "CC=$cc" >> $config_host_mak
+echo "CXX=${CXX-c++}" >> $config_host_mak
+echo "ROCM_XIO_CFLAGS=$rocm_xio_cflags" >> $config_host_mak
+echo "ROCM_XIO_LIBS=$rocm_xio_libs" >> $config_host_mak
 echo "BUILD_CFLAGS=$BUILD_CFLAGS $CFLAGS" >> $config_host_mak
 echo "INSTALL_PREFIX=$prefix" >> $config_host_mak
 

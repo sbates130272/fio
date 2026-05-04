@@ -23,12 +23,14 @@ DEBUGFLAGS = -DFIO_INC_DEBUG
 CPPFLAGS+= -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -DFIO_INTERNAL $(DEBUGFLAGS)
 OPTFLAGS= -g -ffast-math
 FIO_CFLAGS= -std=gnu99 -Wwrite-strings -Wall -Wdeclaration-after-statement $(OPTFLAGS) $(EXTFLAGS) $(BUILD_CFLAGS) -I. -I$(SRCDIR)
+FIO_CXXFLAGS= -std=gnu++17 -Wwrite-strings -Wall $(OPTFLAGS) $(EXTFLAGS) $(BUILD_CFLAGS) -I. -I$(SRCDIR)
 LIBS	+= -lm $(EXTLIBS)
 PROGS	= fio
 SCRIPTS = $(addprefix $(SRCDIR)/,tools/fio_generate_plots tools/plot/fio2gnuplot tools/genfio tools/fiologparser.py tools/hist/fiologparser_hist.py tools/hist/fio-histo-log-pctiles.py tools/fio_jsonplus_clat2csv)
 
 ifndef CONFIG_FIO_NO_OPT
   FIO_CFLAGS += -O3
+  FIO_CXXFLAGS += -O3
 endif
 ifdef CONFIG_BUILD_NATIVE
   FIO_CFLAGS += -march=native
@@ -64,6 +66,7 @@ SOURCE :=	$(sort $(patsubst $(SRCDIR)/%,%,$(wildcard $(SRCDIR)/crc/*.c)) \
 		workqueue.c rate-submit.c optgroup.c helper_thread.c \
 		steadystate.c zone-dist.c zbd.c dedupe.c dataplacement.c \
 		sprandom.c
+CPPSOURCE :=
 
 ifdef CONFIG_LIBHDFS
   HDFSFLAGS= -I $(JAVA_HOME)/include -I $(JAVA_HOME)/include/linux -I $(FIO_LIBHDFS_INCLUDE)
@@ -120,6 +123,12 @@ ifdef CONFIG_LINUX_EXT4_MOVE_EXTENT
 endif
 ifdef CONFIG_LIBCUFILE
   SOURCE += engines/libcufile.c
+endif
+ifdef CONFIG_ROCM_XIO
+  SOURCE += engines/rocm_xio.c
+  CPPSOURCE += engines/rocm_xio_bridge.cpp
+  override CXXFLAGS += $(ROCM_XIO_CFLAGS)
+  LIBS += $(ROCM_XIO_LIBS)
 endif
 ifdef CONFIG_LINUX_SPLICE
   SOURCE += engines/splice.c
@@ -305,10 +314,11 @@ FIO-VERSION-FILE: FORCE
 -include FIO-VERSION-FILE
 
 override CFLAGS := -DFIO_VERSION='"$(FIO_VERSION)"' $(FIO_CFLAGS) $(CFLAGS)
+override CXXFLAGS := -DFIO_VERSION='"$(FIO_VERSION)"' $(FIO_CXXFLAGS) $(CXXFLAGS)
 
 $(foreach eng,$(ENGINES),$(eval $(call engine_template,$(eng))))
 
-OBJS := $(SOURCE:.c=.o)
+OBJS := $(SOURCE:.c=.o) $(CPPSOURCE:.cpp=.o)
 
 FIO_OBJS = $(OBJS) fio.o
 
@@ -505,6 +515,22 @@ all: $(PROGS) $(T_TEST_PROGS) $(UT_PROGS) $(SCRIPTS) $(ENGS_OBJS) FORCE
 	@mkdir -p $(dir $@)
 	$(QUIET_CC)$(CC) -o $@ $(CFLAGS) $(CPPFLAGS) -c $<
 	@$(CC) -MM $(CFLAGS) $(CPPFLAGS) $(SRCDIR)/$*.c > $*.d
+	@mv -f $*.d $*.d.tmp
+	@sed -e 's|.*:|$*.o:|' < $*.d.tmp > $*.d
+	@if type -p fmt >/dev/null 2>&1; then				\
+		sed -e 's/.*://' -e 's/\\$$//' < $*.d.tmp | fmt -w 1 |	\
+		sed -e 's/^ *//' -e 's/$$/:/' >> $*.d;			\
+	else								\
+		sed -e 's/.*://' -e 's/\\$$//' < $*.d.tmp |		\
+		tr -cs "[:graph:]" "\n" |				\
+		sed -e 's/^ *//' -e '/^$$/ d' -e 's/$$/:/' >> $*.d;	\
+	fi
+	@rm -f $*.d.tmp
+
+%.o : %.cpp
+	@mkdir -p $(dir $@)
+	$(QUIET_CC)$(CXX) -o $@ $(CXXFLAGS) $(CPPFLAGS) -c $<
+	@$(CXX) -MM $(CXXFLAGS) $(CPPFLAGS) $(SRCDIR)/$*.cpp > $*.d
 	@mv -f $*.d $*.d.tmp
 	@sed -e 's|.*:|$*.o:|' < $*.d.tmp > $*.d
 	@if type -p fmt >/dev/null 2>&1; then				\
