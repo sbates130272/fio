@@ -2140,6 +2140,12 @@ I/O without transferring buffers between user-space and the kernel,
 unless \fBverify\fR is set or \fBcuda_io\fR is \fBposix\fR. \fBiomem\fR must
 not be \fBcudamalloc\fR. This ioengine defines engine specific options.
 .TP
+.B rocm-xio
+Linux NVMe engine using AMD rocm-xio: HIP staging buffers, GPU-accessible
+DMA registration, and NVMe SQ/CQ programming compatible with the rocm-xio
+nvme-ep path (host CPU submission). Requires the rocm-xio kernel module,
+HIP, and librocm-xio. Build with \fB./configure --enable-rocm-xio\fR.
+.TP
 .B dfs
 I/O engine supporting asynchronous read and write operations to the DAOS File
 System (DFS) via libdfs.
@@ -2960,6 +2966,36 @@ from RAM to GPU after a read. \fBverify\fR does not affect
 the use of cudaMemcpy.
 .RE
 .RE
+.TP
+.BI (rocm-xio)gpu_dev_ids\fR=\fPstr
+Colon-separated HIP device indices. Subjobs pick IDs round-robin.
+Default is 0.
+.TP
+.BI (rocm-xio)rocm_xio_memory_mode\fR=\fPint
+rocm-xio memory mode bitmask (see rocm-xio documentation). Default is 0.
+.TP
+.BI (rocm-xio)rocm_xio_nsid\fR=\fPint
+Target NVMe namespace ID; must match the filename block device.
+Default is 1.
+.TP
+.BI (rocm-xio)rocm_xio_queue_id\fR=\fPint
+NVMe I/O queue id (0 selects the last available I/O queue). Default is 0.
+.TP
+.BI (rocm-xio)rocm_xio_queue_length\fR=\fPint
+SQ/CQ depth (power of two). Default is 64.
+.TP
+.BI (rocm-xio)rocm_xio_batch_size\fR=\fPint
+SQEs per submission batch. Default is 1.
+.TP
+.BI (rocm-xio)rocm_xio_pci_mmio_bridge\fR=\fPbool
+Use PCI MMIO bridge doorbells (QEMU). Default is false.
+.TP
+.BI (rocm-xio)rocm_xio_mmio_bridge_bdf\fR=\fPint
+MMIO bridge BDF in 0xBBDD form; 0 uses rocm-xio auto-detect. Default is 0.
+.TP
+.BI (rocm-xio)rocm_xio_nvme_target_bdf\fR=\fPint
+NVMe controller BDF override in 0xBBDD form; 0 detects from path.
+Default is 0.
 .TP
 .BI (dfs)pool
 Specify the label or UUID of the DAOS pool to connect to.

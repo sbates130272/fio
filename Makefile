@@ -121,6 +121,10 @@ endif
 ifdef CONFIG_LIBCUFILE
   SOURCE += engines/libcufile.c
 endif
+ifdef CONFIG_ROCM_XIO
+  FIO_OBJS += engines/rocm_xio.o
+  LIBS += $(ROCM_XIO_LIBS)
+endif
 ifdef CONFIG_LINUX_SPLICE
   SOURCE += engines/splice.c
 endif
@@ -478,6 +482,7 @@ endif
 ifneq ($(findstring $(MAKEFLAGS),s),s)
 ifndef V
 	QUIET_CC	= @echo '   ' CC $@;
+	QUIET_CXX	= @echo '  ' CXX $@;
 	QUIET_LINK	= @echo ' ' LINK $@;
 	QUIET_DEP	= @echo '  ' DEP $@;
 	QUIET_YACC	= @echo ' ' YACC $@;
@@ -601,6 +606,12 @@ t/ieee754: $(T_IEEE_OBJS)
 
 fio: $(FIO_OBJS)
 	$(QUIET_LINK)$(CC) $(LDFLAGS) -o $@ $(FIO_OBJS) $(LIBS) $(HDFSLIB)
+
+ifdef CONFIG_ROCM_XIO
+engines/rocm_xio.o: engines/rocm_xio.cpp config-host.h
+	@mkdir -p $(dir $@)
+	$(QUIET_CXX)$(ROCM_XIO_CXX) -o $@ $(CFLAGS) $(CPPFLAGS) $(ROCM_XIO_CFLAGS) -c $<
+endif
 
 t/fuzz/fuzz_parseini: $(T_FUZZ_OBJS)
 ifndef LIB_FUZZING_ENGINE

@@ -2345,6 +2345,16 @@ I/O engine
 			:option:`iomem` must not be `cudamalloc`. This ioengine defines
 			engine specific options.
 
+		**rocm-xio**
+			I/O engine for Linux NVMe block devices using AMD `rocm-xio`
+			(GPU-accessible DMA buffers and the rocm-xio kernel module). Data
+			is staged through HIP device memory and registered for NVMe PRPs;
+			submission and completion queues are programmed like `nvme-ep` on
+			the host CPU. Requires the `rocm-xio` module, HIP, and
+			`librocm-xio`. Build with `./configure --enable-rocm-xio` (optional
+			`--with-rocm=` prefix). Use a block device path such as
+			`/dev/nvme0n1` that matches :option:`rocm_xio_nsid`.
+
 		**dfs**
 			I/O engine supporting asynchronous read and write operations to the
 			DAOS File System (DFS) via libdfs.
@@ -3233,6 +3243,52 @@ with the caveat that when used on the command line, they must come after the
 		to transfer data between RAM and the GPUs. Data is copied from
 		GPU to RAM before a write and copied from RAM to GPU after a
 		read. :option:`verify` does not affect use of cudaMemcpy.
+
+.. option:: gpu_dev_ids=str : [rocm-xio]
+
+	Colon-separated HIP device indices (same convention as :option:`gpu_dev_ids`
+	for libcufile). Subjobs pick IDs round-robin. Default is device 0.
+
+.. option:: rocm_xio_memory_mode=int : [rocm-xio]
+
+	Bitmask passed to rocm-xio queue and buffer allocation (see rocm-xio
+	``XIO_MEM_MODE_*`` documentation). Default is **0**.
+
+.. option:: rocm_xio_nsid=int : [rocm-xio]
+
+	Target NVMe namespace ID. Must match the namespace of the
+	:option:`filename` block device (for example namespace **1** for
+	``/dev/nvme0n1``). Default is **1**.
+
+.. option:: rocm_xio_queue_id=int : [rocm-xio]
+
+	NVMe I/O queue id to create (**0** selects the last available I/O queue
+	id, same heuristic as rocm-xio ``xio-tester``). Default is **0**.
+
+.. option:: rocm_xio_queue_length=int : [rocm-xio]
+
+	Submission and completion queue depth (power of two). Default is **64**.
+
+.. option:: rocm_xio_batch_size=int : [rocm-xio]
+
+	SQEs per submission batch for the internal NVMe path. Use **1** unless
+	you know the controller tolerates larger batches with your block size.
+	Default is **1**.
+
+.. option:: rocm_xio_pci_mmio_bridge=bool : [rocm-xio]
+
+	Use the PCI MMIO bridge doorbell path (typical for QEMU). Default is
+	**false**.
+
+.. option:: rocm_xio_mmio_bridge_bdf=int : [rocm-xio]
+
+	MMIO bridge PCI BDF in ``0xBBDD`` form when not using auto-detect. **0**
+	lets rocm-xio pick the bridge. Default is **0**.
+
+.. option:: rocm_xio_nvme_target_bdf=int : [rocm-xio]
+
+	Override NVMe controller BDF in ``0xBBDD`` form. **0** detects from the
+	device path. Default is **0**.
 
 .. option:: nfs_url=str : [nfs]
 
