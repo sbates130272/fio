@@ -1,4 +1,5 @@
 #include <inttypes.h>
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
@@ -167,13 +168,13 @@ static struct disk_util *disk_util_exists(int major, int minor)
 	return NULL;
 }
 
-static int get_device_numbers(char *file_name, int *maj, int *min)
+static int get_device_numbers(const char *file_name, int *maj, int *min)
 {
 	struct stat st;
 	int majdev, mindev;
 	char tempname[PATH_MAX], *p;
 
-	if (!lstat(file_name, &st)) {
+	if (!stat(file_name, &st)) {
 		if (S_ISBLK(st.st_mode)) {
 			majdev = major(st.st_rdev);
 			mindev = minor(st.st_rdev);
@@ -201,6 +202,35 @@ static int get_device_numbers(char *file_name, int *maj, int *min)
 
 	*min = mindev;
 	*maj = majdev;
+
+	return 0;
+}
+
+static int normalize_block_dir(char *path, size_t path_len)
+{
+	struct stat st;
+	char tmp[PATH_MAX], copy[PATH_MAX];
+	char *p;
+
+	/*
+	 * If there's a ../queue/ directory there, we are inside a partition.
+	 * Check if that is the case and jump back. For loop/md/dm etc we are
+	 * already in the right spot.
+	 */
+	snprintf(tmp, FIO_ARRAY_SIZE(tmp), "%s/../queue", path);
+	if (stat(tmp, &st))
+		return 0;
+
+	snprintf(copy, FIO_ARRAY_SIZE(copy), "%s", path);
+	p = dirname(copy);
+	snprintf(tmp, FIO_ARRAY_SIZE(tmp), "%s/queue", p);
+	if (stat(tmp, &st)) {
+		log_err("unknown sysfs layout\n");
+		return -EINVAL;
+	}
+
+	if (snprintf(path, path_len, "%s", p) >= path_len)
+		return -ENAMETOOLONG;
 
 	return 0;
 }
@@ -425,28 +455,34 @@ static struct disk_util *__init_per_file_disk_util(struct thread_data *td,
 						   int majdev, int mindev,
 						   char *path)
 {
-	struct stat st;
-	char tmp[PATH_MAX];
-	char *p;
-
-	/*
-	 * If there's a ../queue/ directory there, we are inside a partition.
-	 * Check if that is the case and jump back. For loop/md/dm etc we
-	 * are already in the right spot.
-	 */
-	sprintf(tmp, "%s/../queue", path);
-	if (!stat(tmp, &st)) {
-		p = dirname(path);
-		sprintf(tmp, "%s/queue", p);
-		if (stat(tmp, &st)) {
-			log_err("unknown sysfs layout\n");
-			return NULL;
-		}
-		snprintf(tmp, FIO_ARRAY_SIZE(tmp), "%s", p);
-		sprintf(path, "%s", tmp);
-	}
+	if (normalize_block_dir(path, PATH_MAX))
+		return NULL;
 
 	return disk_util_add(td, majdev, mindev, path);
+}
+
+int fio_lookup_block_device(const char *filename, char *path, size_t path_len)
+{
+	int mindev, majdev;
+	char sysfs_path[PATH_MAX];
+
+	if (!filename || !path || !path_len)
+		return -EINVAL;
+
+	if (get_device_numbers(filename, &majdev, &mindev))
+		return -ENOENT;
+
+	snprintf(sysfs_path, FIO_ARRAY_SIZE(sysfs_path), "/sys/block");
+	if (!find_block_dir(majdev, mindev, sysfs_path, 1))
+		return -ENOENT;
+
+	if (normalize_block_dir(sysfs_path, FIO_ARRAY_SIZE(sysfs_path)))
+		return -EINVAL;
+
+	if (snprintf(path, path_len, "%s", sysfs_path) >= path_len)
+		return -ENAMETOOLONG;
+
+	return 0;
 }
 
 static struct disk_util *init_per_file_disk_util(struct thread_data *td,

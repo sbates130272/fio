@@ -4,13 +4,16 @@
  *
  */
 
+#include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "../fio.h"
+#include "../diskutil.h"
 #include "../optgroup.h"
 #include "rocm_xio_shim.h"
 
@@ -45,7 +48,184 @@ struct rocm_xio_data {
 	unsigned int posted_tail;
 	unsigned int lba_size;
 	uint64_t capacity_bytes;
+	char *controller;
+	unsigned int nsid;
 };
+
+static const char *fio_rocm_xio_path_basename(const char *path)
+{
+	const char *base;
+
+	base = strrchr(path, '/');
+	return base ? base + 1 : path;
+}
+
+static int fio_rocm_xio_namespace_controller(const char *name,
+					     char *controller,
+					     size_t controller_len,
+					     unsigned int *nsid)
+{
+	const char *p, *n;
+	char *end;
+	unsigned long id;
+
+	if (strncmp(name, "nvme", 4))
+		return -EINVAL;
+
+	p = name + 4;
+	if (*p < '0' || *p > '9')
+		return -EINVAL;
+	while (*p >= '0' && *p <= '9')
+		p++;
+	if (*p != 'n')
+		return -EINVAL;
+	n = p;
+	p++;
+	if (*p < '0' || *p > '9')
+		return -EINVAL;
+
+	errno = 0;
+	id = strtoul(p, &end, 10);
+	if (errno || !id || id > UINT_MAX)
+		return -EINVAL;
+	p = end;
+	while (*p >= '0' && *p <= '9')
+		p++;
+	if (*p && *p != 'p')
+		return -EINVAL;
+
+	if (controller &&
+	    snprintf(controller, controller_len, "/dev/%.*s",
+		     (int)(n - name), name) >= controller_len)
+		return -ENAMETOOLONG;
+	if (nsid)
+		*nsid = id;
+
+	return 0;
+}
+
+static int fio_rocm_xio_find_nvme_controller(const char *sysfs_path,
+					     char *controller,
+					     size_t controller_len,
+					     unsigned int *nsid,
+					     unsigned int depth)
+{
+	char slaves[PATH_MAX], found[PATH_MAX] = { 0 };
+	struct dirent *dirent;
+	unsigned int found_nr = 0;
+	unsigned int found_nsid = 0;
+	const char *name;
+	DIR *dir;
+	int ret;
+
+	if (depth > 8)
+		return -ELOOP;
+
+	name = fio_rocm_xio_path_basename(sysfs_path);
+	ret = fio_rocm_xio_namespace_controller(name, controller,
+						controller_len, nsid);
+	if (!ret)
+		return 0;
+
+	if (strlen(sysfs_path) > sizeof(slaves) - sizeof("/slaves"))
+		return -ENAMETOOLONG;
+	snprintf(slaves, sizeof(slaves), "%s/slaves", sysfs_path);
+	dir = opendir(slaves);
+	if (!dir)
+		return -ENODEV;
+
+	ret = 0;
+	while ((dirent = readdir(dir)) != NULL) {
+		char slave_path[PATH_MAX], candidate[PATH_MAX];
+		unsigned int candidate_nsid = 0;
+		size_t slaves_len, name_len;
+
+		if (!strcmp(dirent->d_name, ".") ||
+		    !strcmp(dirent->d_name, ".."))
+			continue;
+
+		slaves_len = strlen(slaves);
+		name_len = strlen(dirent->d_name);
+		if (slaves_len + 1 + name_len >= sizeof(slave_path)) {
+			ret = -ENAMETOOLONG;
+			break;
+		}
+		memcpy(slave_path, slaves, slaves_len);
+		slave_path[slaves_len] = '/';
+		memcpy(slave_path + slaves_len + 1, dirent->d_name,
+		       name_len + 1);
+
+		ret = fio_rocm_xio_find_nvme_controller(slave_path, candidate,
+							sizeof(candidate),
+							&candidate_nsid,
+							depth + 1);
+		if (ret)
+			continue;
+		if (found_nr &&
+		    (strcmp(found, candidate) || found_nsid != candidate_nsid)) {
+			ret = -EINVAL;
+			break;
+		}
+		snprintf(found, sizeof(found), "%s", candidate);
+		found_nsid = candidate_nsid;
+		found_nr++;
+	}
+	closedir(dir);
+
+	if (ret && ret != -ENODEV)
+		return ret;
+	if (!found_nr)
+		return -ENODEV;
+	if (snprintf(controller, controller_len, "%s", found) >= controller_len)
+		return -ENAMETOOLONG;
+	if (nsid)
+		*nsid = found_nsid;
+
+	return 0;
+}
+
+static int fio_rocm_xio_resolve_controller(struct thread_data *td,
+					   char **controller,
+					   unsigned int *nsid)
+{
+	struct fio_file *f;
+	char sysfs_path[PATH_MAX], resolved[PATH_MAX];
+	unsigned int resolved_nsid = 0;
+	int ret;
+
+	if (!td->files_index || !td->files[0] || !td->files[0]->file_name) {
+		log_err("rocm_xio: filename is required when rocm_xio_controller or rocm_xio_nsid is auto-detected\n");
+		return 1;
+	}
+
+	f = td->files[0];
+	ret = fio_lookup_block_device(f->file_name, sysfs_path,
+				      sizeof(sysfs_path));
+	if (ret) {
+		log_err("rocm_xio: failed to resolve backing block device for %s\n",
+			f->file_name);
+		return 1;
+	}
+
+	ret = fio_rocm_xio_find_nvme_controller(sysfs_path, resolved,
+						sizeof(resolved),
+						&resolved_nsid, 0);
+	if (ret) {
+		log_err("rocm_xio: %s is backed by %s, not an NVMe namespace\n",
+			f->file_name, fio_rocm_xio_path_basename(sysfs_path));
+		return 1;
+	}
+
+	if (controller) {
+		*controller = strdup(resolved);
+		if (!*controller)
+			return 1;
+	}
+	if (nsid)
+		*nsid = resolved_nsid;
+
+	return 0;
+}
 
 static int fio_rocm_xio_validate_options(struct thread_data *td)
 {
@@ -79,6 +259,12 @@ static int fio_rocm_xio_validate_options(struct thread_data *td)
 		return 1;
 	}
 
+	if (td->o.numjobs != 1) {
+		log_err("rocm_xio: numjobs=%u is not supported because cloned jobs share one rocm_xio_queue_id; use one job section with numjobs=1 for each NVMe queue\n",
+			td->o.numjobs);
+		return 1;
+	}
+
 	for_each_td(td2) {
 		if (td2->io_ops != td->io_ops)
 			continue;
@@ -107,7 +293,7 @@ static struct fio_option options[] = {
 		.lname	= "ROCm XIO NVMe controller",
 		.type	= FIO_OPT_STR_STORE,
 		.off1	= offsetof(struct rocm_xio_options, controller),
-		.help	= "NVMe controller path, e.g. /dev/nvme0",
+		.help	= "NVMe controller path, e.g. /dev/nvme0; auto-detected from filename if omitted",
 		.category = FIO_OPT_C_ENGINE,
 		.group	= FIO_OPT_G_ROCM_XIO,
 	},
@@ -146,8 +332,8 @@ static struct fio_option options[] = {
 		.lname	= "ROCm XIO namespace id",
 		.type	= FIO_OPT_INT,
 		.off1	= offsetof(struct rocm_xio_options, nsid),
-		.def	= "1",
-		.help	= "NVMe namespace id",
+		.def	= "0",
+		.help	= "NVMe namespace id, 0 auto-detects from filename",
 		.category = FIO_OPT_C_ENGINE,
 		.group	= FIO_OPT_G_ROCM_XIO,
 	},
@@ -233,6 +419,15 @@ static int fio_rocm_xio_setup(struct thread_data *td)
 
 	td->io_ops_data = data;
 
+	if ((!((struct rocm_xio_options *)td->eo)->controller ||
+	     !((struct rocm_xio_options *)td->eo)->nsid) &&
+	    fio_rocm_xio_resolve_controller(td,
+			((struct rocm_xio_options *)td->eo)->controller ?
+			NULL : &data->controller,
+			((struct rocm_xio_options *)td->eo)->nsid ?
+			NULL : &data->nsid))
+		goto err;
+
 	data->queued = calloc(td->o.iodepth, sizeof(*data->queued));
 	data->queued_bytes = calloc(td->o.iodepth, sizeof(*data->queued_bytes));
 	data->events = calloc(td->o.iodepth, sizeof(*data->events));
@@ -244,14 +439,27 @@ static int fio_rocm_xio_setup(struct thread_data *td)
 	if (!data->queued || !data->queued_bytes || !data->events ||
 	    !data->event_gpu_ns ||
 	    !data->event_bytes || !data->posted_bytes || !data->event_nvme_status)
-		return 1;
+		goto err;
 
 	for_each_file(td, f, i) {
 		if (generic_get_file_size(td, f))
-			return 1;
+			goto err;
 	}
 
 	return 0;
+
+err:
+	free(data->queued);
+	free(data->queued_bytes);
+	free(data->events);
+	free(data->event_gpu_ns);
+	free(data->event_bytes);
+	free(data->posted_bytes);
+	free(data->event_nvme_status);
+	free(data->controller);
+	free(data);
+	td->io_ops_data = NULL;
+	return 1;
 }
 
 static int fio_rocm_xio_init(struct thread_data *td)
@@ -261,19 +469,32 @@ static int fio_rocm_xio_init(struct thread_data *td)
 	struct fio_rocm_xio_session_opts opts = { 0 };
 	struct fio_rocm_xio_namespace_info ns = { 0 };
 	struct fio_file *f;
+	const char *controller = o->controller;
+	unsigned int nsid = o->nsid;
 	int i;
 
-	if (!o->controller) {
-		log_err("rocm_xio: rocm_xio_controller must be set\n");
-		return 1;
+	if (!controller) {
+		if (!data->controller &&
+		    fio_rocm_xio_resolve_controller(td, &data->controller,
+						    nsid ? NULL : &data->nsid))
+			return 1;
+		controller = data->controller;
+	}
+	if (!nsid) {
+		if (!data->nsid &&
+		    fio_rocm_xio_resolve_controller(td,
+						    controller ? NULL : &data->controller,
+						    &data->nsid))
+			return 1;
+		nsid = data->nsid;
 	}
 
-	opts.controller = o->controller;
+	opts.controller = controller;
 	if (td->files_index)
 		opts.filename = td->files[0]->file_name;
 	opts.queue_id = o->queue_id;
 	opts.queue_length = o->queue_length;
-	opts.nsid = o->nsid;
+	opts.nsid = nsid;
 	opts.lfsr_seed = o->lfsr_seed;
 	opts.batch_size = o->batch_size;
 	opts.memory_mode = o->memory_mode;
@@ -322,6 +543,7 @@ static void fio_rocm_xio_cleanup(struct thread_data *td)
 	free(data->event_bytes);
 	free(data->posted_bytes);
 	free(data->event_nvme_status);
+	free(data->controller);
 	free(data);
 	td->io_ops_data = NULL;
 }

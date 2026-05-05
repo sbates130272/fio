@@ -3,6 +3,7 @@
 #define FIO_DU_NAME_SZ		64
 
 #include <stdint.h>
+#include <stddef.h>
 #include <limits.h>
 
 #include "helper_thread.h"
@@ -123,6 +124,8 @@ extern void init_disk_util(struct thread_data *);
 extern int update_io_ticks(void);
 extern void setup_disk_util(void);
 extern void disk_util_prune_entries(void);
+extern int fio_lookup_block_device(const char *filename, char *path,
+				   size_t path_len);
 #else
 /* keep this as a function to avoid a warning in handle_du() */
 #define disk_util_prune_entries()
@@ -132,6 +135,12 @@ extern void disk_util_prune_entries(void);
 static inline int update_io_ticks(void)
 {
 	return helper_should_exit();
+}
+
+static inline int fio_lookup_block_device(const char *filename, char *path,
+					  size_t path_len)
+{
+	return -1;
 }
 #endif
 

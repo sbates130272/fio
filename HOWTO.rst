@@ -3243,7 +3243,9 @@ with the caveat that when used on the command line, they must come after the
 .. option:: rocm_xio_controller=str : [rocm_xio]
 
 	Path to the NVMe controller node used by rocm-xio, for example
-	:file:`/dev/nvme0`.
+	:file:`/dev/nvme0`. If omitted, the engine derives the controller from
+	:file:`filename`, including raw NVMe namespaces and files on
+	NVMe-backed filesystems.
 
 .. option:: rocm_xio_gpu_id=int : [rocm_xio]
 
@@ -3261,7 +3263,8 @@ with the caveat that when used on the command line, they must come after the
 
 .. option:: rocm_xio_nsid=int : [rocm_xio]
 
-	NVMe namespace id used for I/O commands. Default is 1.
+	NVMe namespace id used for I/O commands. Default is 0, which derives the
+	namespace id from :file:`filename`.
 
 .. option:: rocm_xio_lfsr_seed=int : [rocm_xio]
 
