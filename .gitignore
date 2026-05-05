@@ -7,6 +7,7 @@
 /config-host.h
 /config-host.mak
 /config.log
+/.venv/
 /cscope.out
 /fio
 /gfio

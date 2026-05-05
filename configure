@@ -15,12 +15,13 @@ fi
 
 TMPC="${TMPDIR1}/fio-conf-${RANDOM}-$$-${RANDOM}.c"
 TMPC2="${TMPDIR1}/fio-conf-${RANDOM}-$$-${RANDOM}-2.c"
+TMPCXX="${TMPDIR1}/fio-conf-${RANDOM}-$$-${RANDOM}.cpp"
 TMPO="${TMPDIR1}/fio-conf-${RANDOM}-$$-${RANDOM}.o"
 TMPE="${TMPDIR1}/fio-conf-${RANDOM}-$$-${RANDOM}.exe"
 
 # NB: do not call "exit" in the trap handler; this is buggy with some shells;
 # see <1285349658-3122-1-git-send-email-loic.minier@linaro.org>
-trap "rm -f $TMPC $TMPC2 $TMPO $TMPE" EXIT INT QUIT TERM
+trap "rm -f $TMPC $TMPC2 $TMPCXX $TMPO $TMPE" EXIT INT QUIT TERM
 
 rm -rf config.log
 
@@ -46,6 +47,7 @@ print_config() {
 # Default CFLAGS
 CFLAGS="-D_GNU_SOURCE -include config-host.h $CFLAGS"
 CONFIGURE_CFLAGS="-Werror-implicit-function-declaration"
+CONFIGURE_CXXFLAGS=""
 BUILD_CFLAGS=""
 
 # Print a helpful header at the top of config.log
@@ -97,6 +99,35 @@ compile_prog() {
   local_ldflags="$2 $LIBS"
   echo "Compiling test case $3" >> config.log
   do_cc $CFLAGS $CONFIGURE_CFLAGS $local_cflags -o $TMPE $TMPC $LDFLAGS $local_ldflags
+}
+
+do_cxx() {
+    # Run the C++ compiler, capturing its output to the log.
+    echo $cxx "$@" >> config.log
+    $cxx "$@" >> config.log 2>&1 || return $?
+    # Test passed. If this is an --enable-werror build, rerun
+    # the test with -Werror and bail out if it fails.
+    if test "$werror" != "yes"; then
+        return 0
+    fi
+    case "$*" in
+        *-Werror*)
+           return 0
+        ;;
+    esac
+    echo $cxx -Werror "$@" >> config.log
+    $cxx -Werror "$@" >> config.log 2>&1 && return $?
+    echo "ERROR: configure C++ test passed without -Werror but failed with -Werror."
+    echo "This is probably a bug in the configure script. The failing command"
+    echo "will be at the bottom of config.log."
+    fatal "You can run configure with --disable-werror to bypass this check."
+}
+
+compile_cxx_prog() {
+  local_cxxflags="$1"
+  local_ldflags="$2 $LIBS"
+  echo "Compiling C++ test case $3" >> config.log
+  do_cxx $CFLAGS $CXXFLAGS $CONFIGURE_CXXFLAGS $local_cxxflags -o $TMPE $TMPCXX $LDFLAGS $local_ldflags
 }
 
 feature_not_found() {
@@ -183,6 +214,7 @@ cuda="no"
 cuda13="no"
 libcufile="no"
 rocm_xio=""
+rocm_xio_path=""
 disable_lex=""
 disable_pmem="no"
 disable_native="no"
@@ -213,6 +245,8 @@ for opt do
   esx="yes"
   ;;
   --cc=*) CC="$optarg"
+  ;;
+  --cxx=*) CXX="$optarg"
   ;;
   --extra-cflags=*) CFLAGS="$CFLAGS $optarg"
   ;;
@@ -259,6 +293,8 @@ for opt do
   --enable-rocm-xio) rocm_xio="yes"
   ;;
   --disable-rocm-xio) rocm_xio="no"
+  ;;
+  --with-rocm-xio=*) rocm_xio_path="$optarg"; rocm_xio="yes"
   ;;
   --disable-native) disable_native="yes"
   ;;
@@ -333,6 +369,7 @@ if test "$show_help" = "yes" ; then
   echo "--enable-libcufile      Enable GPUDirect Storage cuFile support"
   echo "--enable-rocm-xio       Enable ROCm XIO support"
   echo "--disable-rocm-xio      Disable ROCm XIO support even if found"
+  echo "--with-rocm-xio=        Install path for ROCm XIO/AIS"
   echo "--disable-native        Don't build for native host"
   echo "--with-ime=             Install path for DDN's Infinite Memory Engine"
   echo "--enable-libiscsi       Enable iscsi support"
@@ -365,6 +402,16 @@ if test -z "${CC}${cross_prefix}"; then
   fi
 else
   cc="${CC-${cross_prefix}gcc}"
+fi
+
+if test -z "${CXX}${cross_prefix}"; then
+  if has g++; then
+    cxx=g++
+  elif has clang++; then
+    cxx=clang++
+  fi
+else
+  cxx="${CXX-${cross_prefix}g++}"
 fi
 
 if check_define __ANDROID__ ; then
@@ -2865,9 +2912,39 @@ print_config "libcufile" "$libcufile"
 ##########################################
 # Check if we have rocm-xio
 if test "$rocm_xio" != "no" ; then
-cat > $TMPC << EOF
-#include <xio.h>
+  if has hipcc; then
+    cxx=hipcc
+  fi
+
+  rocm_xio_cflags="-D__HIP_PLATFORM_AMD__"
+  rocm_xio_libs="--offload-arch=native -fgpu-rdc --hip-link -lrocm-xio -lhsa-runtime64 -lamdhip64 -lhsakmt -ldrm -ldrm_amdgpu -lpthread -lrt -ldl"
+  rocm_xio_search="$rocm_xio_path /opt/rocs-ais /opt/rocm"
+
+  for rocm_xio_dir in $rocm_xio_search; do
+    if test -d "$rocm_xio_dir/include"; then
+      rocm_xio_cflags="$rocm_xio_cflags -I$rocm_xio_dir/include"
+    fi
+    if test -d "$rocm_xio_dir/include/rocm-xio"; then
+      rocm_xio_cflags="$rocm_xio_cflags -I$rocm_xio_dir/include/rocm-xio"
+    fi
+    if test -d "$rocm_xio_dir/lib"; then
+      rocm_xio_libs="-L$rocm_xio_dir/lib -Wl,-rpath,$rocm_xio_dir/lib $rocm_xio_libs"
+    fi
+  done
+
+cat > $TMPCXX << EOF
+#if defined(__has_include)
+#if __has_include(<rocm-xio/xio.h>)
+#include <rocm-xio/endpoints/nvme-ep/nvme-ep.h>
+#include <rocm-xio/xio.h>
+#else
 #include <nvme-ep.h>
+#include <xio.h>
+#endif
+#else
+#include <nvme-ep.h>
+#include <xio.h>
+#endif
 #include <hip/hip_runtime.h>
 int main(void)
 {
@@ -2876,10 +2953,12 @@ int main(void)
   return ep ? 0 : 1;
 }
 EOF
-  if compile_prog "" "-lrocm-xio -lamdhip64 -lhsa-runtime64 -ldl" "rocm-xio"; then
+  if compile_cxx_prog "$rocm_xio_cflags" "$rocm_xio_libs" "rocm-xio"; then
     rocm_xio="yes"
-    rocm_xio_libs="-lrocm-xio -lamdhip64 -lhsa-runtime64 -ldl"
   else
+    if test "$rocm_xio" = "yes" ; then
+      feature_not_found "rocm-xio" "rocm-xio/AIS and ROCm HIP development libraries"
+    fi
     rocm_xio="no"
   fi
 fi
@@ -3474,6 +3553,7 @@ if test "$libblkio" = "yes" ; then
 fi
 if test "$rocm_xio" = "yes" ; then
   output_sym "CONFIG_ROCM_XIO"
+  echo "ROCM_XIO_CFLAGS=$rocm_xio_cflags" >> $config_host_mak
   echo "ROCM_XIO_LIBS=$rocm_xio_libs" >> $config_host_mak
 fi
 if test "$dynamic_engines" = "yes" ; then
@@ -3523,6 +3603,7 @@ echo "GFIO_LIBS+=$GFIO_LIBS" >> $config_host_mak
 echo "CFLAGS+=$CFLAGS" >> $config_host_mak
 echo "LDFLAGS+=$LDFLAGS" >> $config_host_mak
 echo "CC=$cc" >> $config_host_mak
+echo "CXX=$cxx" >> $config_host_mak
 echo "BUILD_CFLAGS=$BUILD_CFLAGS $CFLAGS" >> $config_host_mak
 echo "INSTALL_PREFIX=$prefix" >> $config_host_mak
 

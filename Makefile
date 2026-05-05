@@ -23,15 +23,20 @@ DEBUGFLAGS = -DFIO_INC_DEBUG
 CPPFLAGS+= -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -DFIO_INTERNAL $(DEBUGFLAGS)
 OPTFLAGS= -g -ffast-math
 FIO_CFLAGS= -std=gnu99 -Wwrite-strings -Wall -Wdeclaration-after-statement $(OPTFLAGS) $(EXTFLAGS) $(BUILD_CFLAGS) -I. -I$(SRCDIR)
+FIO_CXXFLAGS= -std=gnu++11 -Wall $(OPTFLAGS) $(EXTFLAGS) $(BUILD_CFLAGS) -I. -I$(SRCDIR)
 LIBS	+= -lm $(EXTLIBS)
 PROGS	= fio
 SCRIPTS = $(addprefix $(SRCDIR)/,tools/fio_generate_plots tools/plot/fio2gnuplot tools/genfio tools/fiologparser.py tools/hist/fiologparser_hist.py tools/hist/fio-histo-log-pctiles.py tools/fio_jsonplus_clat2csv)
+FIO_LD	= $(CC)
+FIO_LIBS =
 
 ifndef CONFIG_FIO_NO_OPT
   FIO_CFLAGS += -O3
+  FIO_CXXFLAGS += -O3
 endif
 ifdef CONFIG_BUILD_NATIVE
   FIO_CFLAGS += -march=native
+  FIO_CXXFLAGS += -march=native
 endif
 
 ifdef CONFIG_PDB
@@ -123,8 +128,13 @@ ifdef CONFIG_LIBCUFILE
 endif
 ifdef CONFIG_ROCM_XIO
   rocm_xio_SRCS = engines/rocm_xio.c engines/rocm_xio_shim.cpp
-  rocm_xio_LIBS = $(ROCM_XIO_LIBS)
   rocm_xio_CFLAGS = $(ROCM_XIO_CFLAGS)
+  FIO_LD = $(CXX)
+  ifdef CONFIG_DYNAMIC_ENGINES
+    rocm_xio_LIBS = $(ROCM_XIO_LIBS)
+  else
+    FIO_LIBS += $(ROCM_XIO_LIBS)
+  endif
   ENGINES += rocm_xio
 endif
 ifdef CONFIG_LINUX_SPLICE
@@ -295,6 +305,7 @@ define engine_template =
 $(1)_OBJS := $$(patsubst %.c,%.o,$$($(1)_SRCS))
 $(1)_OBJS := $$(patsubst %.cpp,%.o,$$($(1)_OBJS))
 $$($(1)_OBJS): CFLAGS := -fPIC $$($(1)_CFLAGS) $(CFLAGS)
+$$($(1)_OBJS): CXXFLAGS := -fPIC $$($(1)_CFLAGS) $(CXXFLAGS)
 engines/fio-$(1).so: $$($(1)_OBJS)
 	$$(QUIET_LINK)$$(if $$(filter %.cpp,$$($(1)_SRCS)),$$(CXX),$(CC)) $(LDFLAGS) -shared -rdynamic -fPIC -Wl,-soname,fio-$(1).so.1 -o $$@ $$($(1)_OBJS) $$($(1)_LIBS)
 ENGS_OBJS += engines/fio-$(1).so
@@ -304,6 +315,7 @@ define engine_template =
 SOURCE += $$($(1)_SRCS)
 LIBS += $$($(1)_LIBS)
 override CFLAGS += $$($(1)_CFLAGS)
+override CXXFLAGS += $$($(1)_CFLAGS)
 endef
 endif
 
@@ -312,6 +324,7 @@ FIO-VERSION-FILE: FORCE
 -include FIO-VERSION-FILE
 
 override CFLAGS := -DFIO_VERSION='"$(FIO_VERSION)"' $(FIO_CFLAGS) $(CFLAGS)
+override CXXFLAGS := -DFIO_VERSION='"$(FIO_VERSION)"' $(FIO_CXXFLAGS) $(CXXFLAGS)
 
 $(foreach eng,$(ENGINES),$(eval $(call engine_template,$(eng))))
 
@@ -527,8 +540,8 @@ all: $(PROGS) $(T_TEST_PROGS) $(UT_PROGS) $(SCRIPTS) $(ENGS_OBJS) FORCE
 
 %.o : %.cpp
 	@mkdir -p $(dir $@)
-	$(QUIET_CC)$(CXX) -o $@ $(CFLAGS) $(CPPFLAGS) -c $<
-	@$(CXX) -MM $(CFLAGS) $(CPPFLAGS) $(SRCDIR)/$*.cpp > $*.d
+	$(QUIET_CC)$(CXX) -o $@ $(CXXFLAGS) $(CPPFLAGS) -c $<
+	@$(CXX) -MM $(CXXFLAGS) $(CPPFLAGS) $(SRCDIR)/$*.cpp > $*.d
 	@mv -f $*.d $*.d.tmp
 	@sed -e 's|.*:|$*.o:|' < $*.d.tmp > $*.d
 	@if type -p fmt >/dev/null 2>&1; then				\
@@ -624,7 +637,7 @@ t/ieee754: $(T_IEEE_OBJS)
 	$(QUIET_LINK)$(CC) $(LDFLAGS) -o $@ $(T_IEEE_OBJS) $(LIBS)
 
 fio: $(FIO_OBJS)
-	$(QUIET_LINK)$(CC) $(LDFLAGS) -o $@ $(FIO_OBJS) $(LIBS) $(HDFSLIB)
+	$(QUIET_LINK)$(FIO_LD) $(LDFLAGS) -o $@ $(FIO_OBJS) $(LIBS) $(FIO_LIBS) $(HDFSLIB)
 
 t/fuzz/fuzz_parseini: $(T_FUZZ_OBJS)
 ifndef LIB_FUZZING_ENGINE

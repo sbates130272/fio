@@ -88,10 +88,8 @@ int fio_rocm_xio_init_ctx(const struct fio_rocm_xio_options *opts,
 	ctx->nvme_cfg->queueLength = ctx->opts.queue_length;
 	ctx->nvme_cfg->ioParams.nsid = ctx->opts.nsid;
 	ctx->nvme_cfg->ioParams.lfsrSeed = ctx->opts.lfsr_seed;
-	ctx->nvme_cfg->ioParams.batchSize = ctx->opts.batch_size;
 	ctx->nvme_cfg->ioParams.infiniteMode = false;
 	ctx->nvme_cfg->ioParams.accessPattern = "sequential";
-	ctx->nvme_cfg->verify = false;
 	ctx->nvme_cfg->ioParams.readIo = 1;
 	ctx->nvme_cfg->ioParams.writeIo = 0;
 	ctx->nvme_cfg->bufferParams.bufferSize = 4096;
@@ -155,6 +153,7 @@ int fio_rocm_xio_submit(struct fio_rocm_xio_ctx *ctx, int is_write,
 	ctx->nvme_cfg->ioParams.writeIo = is_write ? 1 : 0;
 	ctx->nvme_cfg->bufferParams.bufferSize = len;
 	ctx->base_cfg.endpointConfig = ctx->nvme_cfg;
+	ctx->base_cfg.iterations = ctx->endpoint->getIterations(ctx->nvme_cfg);
 
 	hret = ctx->endpoint->run(&ctx->base_cfg);
 	if (hret != hipSuccess) {
