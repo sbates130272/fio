@@ -3274,11 +3274,20 @@ with the caveat that when used on the command line, they must come after the
 .. option:: rocm_xio_memory_mode=int : [rocm_xio]
 
 	Raw rocm-xio memory mode bitmap used when allocating queue and data
-	buffers.
+	buffers. On bare metal, host-memory mode requires an IOMMU passthrough
+	domain for the NVMe controller, for example a kernel command line with
+	:file:`iommu=pt`. Use memory mode 11 to exercise device-backed queues
+	and data buffers.
 
 .. option:: rocm_xio_pci_mmio_bridge=bool : [rocm_xio]
 
 	Enable rocm-xio PCI MMIO bridge doorbell mode.
+
+.. option:: rocm_xio_verify_lfsr=bool : [rocm_xio]
+
+	Enable rocm-xio LFSR pattern verification. This uses rocm-xio's native
+	LFSR data pattern support and is distinct from fio's generic verify
+	buffer path.
 
 .. option:: rocm_xio_verbose=bool : [rocm_xio]
 
