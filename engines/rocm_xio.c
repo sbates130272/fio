@@ -265,6 +265,11 @@ static int fio_rocm_xio_validate_options(struct thread_data *td)
 		return 1;
 	}
 
+	if (!td->o.use_thread) {
+		log_err("rocm_xio: thread=1 is required; process-based jobs cannot safely share ROCm/HIP state\n");
+		return 1;
+	}
+
 	for_each_td(td2) {
 		if (td2->io_ops != td->io_ops)
 			continue;
