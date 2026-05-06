@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +45,7 @@ struct rocm_xio_data {
 	unsigned int queued_nr;
 	unsigned int events_nr;
 	unsigned int last_events;
+	unsigned int inflight;
 	unsigned int posted_head;
 	unsigned int posted_tail;
 	unsigned int lba_size;
@@ -576,8 +578,10 @@ static int fio_rocm_xio_commit(struct thread_data *td)
 		desc.do_verify = ((struct rocm_xio_options *) td->eo)->verify_lfsr;
 
 		ret = fio_rocm_xio_post_desc(data->ctx, &desc);
+		if (ret == -EAGAIN)
+			break;
 		if (ret < 0) {
-			io_u->error = EIO;
+			io_u->error = -ret;
 			data->event_gpu_ns[data->events_nr] = 0;
 			data->event_bytes[data->events_nr] = data->queued_bytes[i];
 			data->event_nvme_status[data->events_nr] = 0;
@@ -585,6 +589,7 @@ static int fio_rocm_xio_commit(struct thread_data *td)
 		} else {
 			data->posted_bytes[data->posted_tail++ % td->o.iodepth] =
 				data->queued_bytes[i];
+			data->inflight++;
 			io_u_queued(td, io_u);
 			posted++;
 		}
@@ -592,42 +597,16 @@ static int fio_rocm_xio_commit(struct thread_data *td)
 
 	if (posted)
 		io_u_mark_submit(td, posted);
-	data->queued_nr = 0;
+	if (i < data->queued_nr) {
+		unsigned int left = data->queued_nr - i;
 
-	while (posted && data->events_nr < posted) {
-		struct fio_rocm_xio_completion comp = { 0 };
-		struct io_u *io_u;
-		int ret;
-
-		ret = fio_rocm_xio_reap(data->ctx, 1, 1, &comp, NULL);
-		if (ret <= 0)
-			continue;
-
-		io_u = (struct io_u *)(uintptr_t) comp.user_data;
-		if (io_u)
-			io_u->error = comp.error;
-		data->event_gpu_ns[data->events_nr] = comp.gpu_elapsed_ns;
-		data->event_bytes[data->events_nr] =
-			data->posted_bytes[data->posted_head++ % td->o.iodepth];
-		data->event_nvme_status[data->events_nr] = comp.nvme_status;
-		if (io_u && comp.gpu_elapsed_ns) {
-			struct timespec now;
-			uint64_t gpu_ns = comp.gpu_elapsed_ns;
-
-			fio_gettime(&now, NULL);
-			io_u->issue_time = now;
-			while (gpu_ns >= 1000000000ULL) {
-				io_u->issue_time.tv_sec--;
-				gpu_ns -= 1000000000ULL;
-			}
-			if ((uint64_t) io_u->issue_time.tv_nsec >= gpu_ns) {
-				io_u->issue_time.tv_nsec -= gpu_ns;
-			} else {
-				io_u->issue_time.tv_sec--;
-				io_u->issue_time.tv_nsec += 1000000000ULL - gpu_ns;
-			}
-		}
-		data->events[data->events_nr++] = io_u;
+		memmove(data->queued, data->queued + i,
+			left * sizeof(*data->queued));
+		memmove(data->queued_bytes, data->queued_bytes + i,
+			left * sizeof(*data->queued_bytes));
+		data->queued_nr = left;
+	} else {
+		data->queued_nr = 0;
 	}
 	return 0;
 }
@@ -638,6 +617,7 @@ static int fio_rocm_xio_getevents(struct thread_data *td, unsigned int min,
 {
 	struct rocm_xio_data *data = td->io_ops_data;
 	struct timespec now;
+	enum { rocm_xio_reap_batch = 32 };
 
 	if (!data)
 		return 0;
@@ -646,39 +626,55 @@ static int fio_rocm_xio_getevents(struct thread_data *td, unsigned int min,
 		fio_rocm_xio_commit(td);
 
 	while (data->events_nr < max) {
-		struct fio_rocm_xio_completion comp = { 0 };
-		struct io_u *io_u;
+		struct fio_rocm_xio_completion comps[rocm_xio_reap_batch] = { 0 };
+		unsigned int want = max - data->events_nr;
 		int ret;
 
-		ret = fio_rocm_xio_reap(data->ctx, 0, 1, &comp, NULL);
-		if (ret <= 0)
-			break;
-		io_u = (struct io_u *)(uintptr_t) comp.user_data;
-		if (io_u) {
-			io_u->error = comp.error;
-			io_u->resid = comp.error ? io_u->xfer_buflen : 0;
-		}
-		data->event_gpu_ns[data->events_nr] = comp.gpu_elapsed_ns;
-		data->event_bytes[data->events_nr] =
-			data->posted_bytes[data->posted_head++ % td->o.iodepth];
-		data->event_nvme_status[data->events_nr] = comp.nvme_status;
-		if (io_u && comp.gpu_elapsed_ns) {
-			uint64_t gpu_ns = comp.gpu_elapsed_ns;
+		if (want > rocm_xio_reap_batch)
+			want = rocm_xio_reap_batch;
 
-			fio_gettime(&now, NULL);
-			io_u->issue_time = now;
-			while (gpu_ns >= 1000000000ULL) {
-				io_u->issue_time.tv_sec--;
-				gpu_ns -= 1000000000ULL;
-			}
-			if ((uint64_t) io_u->issue_time.tv_nsec >= gpu_ns) {
-				io_u->issue_time.tv_nsec -= gpu_ns;
-			} else {
-				io_u->issue_time.tv_sec--;
-				io_u->issue_time.tv_nsec += 1000000000ULL - gpu_ns;
-			}
+		ret = fio_rocm_xio_reap(data->ctx, 0, want, comps, NULL);
+		if (ret <= 0) {
+			if (data->events_nr < min)
+				sched_yield();
+			else
+				break;
+			continue;
 		}
-		data->events[data->events_nr++] = io_u;
+
+		for (int i = 0; i < ret && data->events_nr < max; i++) {
+			struct fio_rocm_xio_completion *comp = &comps[i];
+			struct io_u *io_u =
+				(struct io_u *)(uintptr_t) comp->user_data;
+
+			if (io_u) {
+				io_u->error = comp->error;
+				io_u->resid = comp->error ? io_u->xfer_buflen : 0;
+			}
+			data->event_gpu_ns[data->events_nr] = comp->gpu_elapsed_ns;
+			data->event_bytes[data->events_nr] =
+				data->posted_bytes[data->posted_head++ % td->o.iodepth];
+			if (data->inflight)
+				data->inflight--;
+			data->event_nvme_status[data->events_nr] = comp->nvme_status;
+			if (io_u && comp->gpu_elapsed_ns) {
+				uint64_t gpu_ns = comp->gpu_elapsed_ns;
+
+				fio_gettime(&now, NULL);
+				io_u->issue_time = now;
+				while (gpu_ns >= 1000000000ULL) {
+					io_u->issue_time.tv_sec--;
+					gpu_ns -= 1000000000ULL;
+				}
+				if ((uint64_t) io_u->issue_time.tv_nsec >= gpu_ns) {
+					io_u->issue_time.tv_nsec -= gpu_ns;
+				} else {
+					io_u->issue_time.tv_sec--;
+					io_u->issue_time.tv_nsec += 1000000000ULL - gpu_ns;
+				}
+			}
+			data->events[data->events_nr++] = io_u;
+		}
 	}
 
 	if (data->events_nr > max)
@@ -705,9 +701,11 @@ static struct io_u *fio_rocm_xio_event(struct thread_data *td, int event)
 		}
 		io_u->resid = io_u->error ? io_u->xfer_buflen : 0;
 	}
-	if (io_u && io_u->error && data->event_nvme_status[event])
-		log_err("rocm_xio: NVMe status=0x%04x\n",
-			data->event_nvme_status[event]);
+	if (io_u && io_u->error)
+		log_err("rocm_xio: completion error=%d, NVMe status=0x%04x, offset=%llu, len=%llu\n",
+			io_u->error, data->event_nvme_status[event],
+			(unsigned long long) io_u->offset,
+			(unsigned long long) io_u->xfer_buflen);
 
 	return io_u;
 }
@@ -745,7 +743,7 @@ static enum fio_q_status fio_rocm_xio_queue(struct thread_data *td,
 
 	fio_ro_check(td, io_u);
 
-	if (data->events_nr || data->queued_nr == td->o.iodepth)
+	if (data->events_nr || data->queued_nr + data->inflight >= td->o.iodepth)
 		return FIO_Q_BUSY;
 
 	io_u->error = 0;

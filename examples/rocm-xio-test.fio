@@ -35,11 +35,11 @@ direct=1
 thread=1
 iodepth=64
 rw=randread
-bs=8k
+bs=512
 size=100%
 group_reporting=1
 time_based=1
-runtime=600s
+runtime=30s
 
 [rocm_xio_queue_27]
 rocm_xio_queue_id=27
