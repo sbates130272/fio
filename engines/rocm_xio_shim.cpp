@@ -82,6 +82,9 @@ int fio_rocm_xio_open_session(const struct fio_rocm_xio_session_opts *opts,
 	popts.maxTransferBytes = 1024 * 1024;
 	popts.ringDepth = ctx->opts.ring_depth;
 	popts.batchSize = ctx->opts.batch_size;
+	popts.sqBatchSize = ctx->opts.sq_batch_size;
+	popts.cqBatchSize = ctx->opts.cq_batch_size;
+	popts.precomputePrps = ctx->opts.precompute_prps;
 	popts.gpuId = ctx->opts.gpu_id;
 	popts.usePciMmioBridge = ctx->opts.use_pci_mmio_bridge;
 	popts.verbose = ctx->opts.verbose;
@@ -130,6 +133,49 @@ int fio_rocm_xio_get_namespace_info(struct fio_rocm_xio_session *ctx,
 	info->capacity_lbas = ctx->capacity_lbas;
 	info->capacity_bytes = ctx->capacity_lbas * ctx->lba_size;
 	return 0;
+}
+
+int fio_rocm_xio_get_phase_stats(struct fio_rocm_xio_session *ctx,
+				 struct fio_rocm_xio_phase_stats *stats)
+{
+	xio::nvme_ep::nvmePersistentPhaseStats pstats = {};
+
+	if (!ctx || !stats || !ctx->session)
+		return -1;
+
+	if (xio::nvme_ep::getPersistentPhaseStats(ctx->session, &pstats) < 0)
+		return -1;
+
+	stats->idle_wait = pstats.idleWait;
+	stats->desc_load = pstats.descLoad;
+	stats->prp_build = pstats.prpBuild;
+	stats->sqe_build = pstats.sqeBuild;
+	stats->sqe_write = pstats.sqeWrite;
+	stats->sq_fence = pstats.sqFence;
+	stats->sq_doorbell = pstats.sqDoorbell;
+	stats->cq_poll = pstats.cqPoll;
+	stats->verify = pstats.verify;
+	stats->cq_doorbell = pstats.cqDoorbell;
+	stats->completion_publish = pstats.completionPublish;
+	stats->io_count = pstats.ioCount;
+	stats->batch_count = pstats.batchCount;
+	stats->submitted_count = pstats.submittedCount;
+	stats->completed_count = pstats.completedCount;
+	stats->poll_iterations = pstats.pollIterations;
+	stats->timeout_count = pstats.timeoutCount;
+	stats->error_count = pstats.errorCount;
+	stats->max_batch = pstats.maxBatch;
+	stats->max_polls = pstats.maxPolls;
+	stats->gpu_clock_khz = pstats.gpuClockKHz;
+	return 0;
+}
+
+int fio_rocm_xio_reset_phase_stats(struct fio_rocm_xio_session *ctx)
+{
+	if (!ctx || !ctx->session)
+		return -1;
+
+	return xio::nvme_ep::resetPersistentPhaseStats(ctx->session) < 0 ? -1 : 0;
 }
 
 int fio_rocm_xio_submit_desc(struct fio_rocm_xio_session *ctx,

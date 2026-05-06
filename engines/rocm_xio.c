@@ -26,11 +26,15 @@ struct rocm_xio_options {
 	unsigned int nsid;
 	unsigned int lfsr_seed;
 	unsigned int batch_size;
+	unsigned int sq_batch_size;
+	unsigned int cq_batch_size;
 	unsigned int memory_mode;
 	int gpu_id;
 	int pci_mmio_bridge;
+	int precompute_prps;
 	int verify_lfsr;
 	int verbose;
+	int profile;
 };
 
 struct rocm_xio_data {
@@ -244,14 +248,34 @@ static int fio_rocm_xio_validate_options(struct thread_data *td)
 		return 1;
 	}
 
-	if (!o->batch_size) {
-		log_err("rocm_xio: rocm_xio_batch_size must be greater than zero\n");
+	if (o->batch_size && (o->sq_batch_size || o->cq_batch_size)) {
+		log_err("rocm_xio: rocm_xio_batch_size cannot be set with rocm_xio_sq_batch_size or rocm_xio_cq_batch_size\n");
 		return 1;
 	}
+
+	if (!!o->sq_batch_size != !!o->cq_batch_size) {
+		log_err("rocm_xio: rocm_xio_sq_batch_size and rocm_xio_cq_batch_size must be set together\n");
+		return 1;
+	}
+
+	if (!o->batch_size && !o->sq_batch_size)
+		o->batch_size = 1;
 
 	if (o->batch_size > td->o.iodepth) {
 		log_err("rocm_xio: rocm_xio_batch_size=%u exceeds iodepth=%u\n",
 			o->batch_size, td->o.iodepth);
+		return 1;
+	}
+
+	if (o->sq_batch_size > td->o.iodepth) {
+		log_err("rocm_xio: rocm_xio_sq_batch_size=%u exceeds iodepth=%u\n",
+			o->sq_batch_size, td->o.iodepth);
+		return 1;
+	}
+
+	if (o->cq_batch_size > td->o.iodepth) {
+		log_err("rocm_xio: rocm_xio_cq_batch_size=%u exceeds iodepth=%u\n",
+			o->cq_batch_size, td->o.iodepth);
 		return 1;
 	}
 
@@ -359,8 +383,28 @@ static struct fio_option options[] = {
 		.lname	= "ROCm XIO batch size",
 		.type	= FIO_OPT_INT,
 		.off1	= offsetof(struct rocm_xio_options, batch_size),
-		.def	= "1",
-		.help	= "SQEs per doorbell ring used by rocm-xio",
+		.def	= "0",
+		.help	= "Legacy SQ/CQ batch size, mutually exclusive with split batch options",
+		.category = FIO_OPT_C_ENGINE,
+		.group	= FIO_OPT_G_ROCM_XIO,
+	},
+	{
+		.name	= "rocm_xio_sq_batch_size",
+		.lname	= "ROCm XIO SQ batch size",
+		.type	= FIO_OPT_INT,
+		.off1	= offsetof(struct rocm_xio_options, sq_batch_size),
+		.def	= "0",
+		.help	= "SQEs per SQ worker pass; requires rocm_xio_cq_batch_size",
+		.category = FIO_OPT_C_ENGINE,
+		.group	= FIO_OPT_G_ROCM_XIO,
+	},
+	{
+		.name	= "rocm_xio_cq_batch_size",
+		.lname	= "ROCm XIO CQ batch size",
+		.type	= FIO_OPT_INT,
+		.off1	= offsetof(struct rocm_xio_options, cq_batch_size),
+		.def	= "0",
+		.help	= "CQEs per CQ worker pass; requires rocm_xio_sq_batch_size",
 		.category = FIO_OPT_C_ENGINE,
 		.group	= FIO_OPT_G_ROCM_XIO,
 	},
@@ -385,6 +429,16 @@ static struct fio_option options[] = {
 		.group	= FIO_OPT_G_ROCM_XIO,
 	},
 	{
+		.name	= "rocm_xio_precompute_prps",
+		.lname	= "ROCm XIO precompute PRPs",
+		.type	= FIO_OPT_BOOL,
+		.off1	= offsetof(struct rocm_xio_options, precompute_prps),
+		.def	= "0",
+		.help	= "Enable persistent-worker fast PRP setup path",
+		.category = FIO_OPT_C_ENGINE,
+		.group	= FIO_OPT_G_ROCM_XIO,
+	},
+	{
 		.name	= "rocm_xio_verify_lfsr",
 		.lname	= "ROCm XIO LFSR verify",
 		.type	= FIO_OPT_BOOL,
@@ -401,6 +455,16 @@ static struct fio_option options[] = {
 		.off1	= offsetof(struct rocm_xio_options, verbose),
 		.def	= "0",
 		.help	= "Enable verbose rocm-xio logging",
+		.category = FIO_OPT_C_ENGINE,
+		.group	= FIO_OPT_G_ROCM_XIO,
+	},
+	{
+		.name	= "rocm_xio_profile",
+		.lname	= "ROCm XIO profile mode",
+		.type	= FIO_OPT_BOOL,
+		.off1	= offsetof(struct rocm_xio_options, profile),
+		.def	= "0",
+		.help	= "Print ROCm XIO persistent worker phase counters",
 		.category = FIO_OPT_C_ENGINE,
 		.group	= FIO_OPT_G_ROCM_XIO,
 	},
@@ -504,13 +568,19 @@ static int fio_rocm_xio_init(struct thread_data *td)
 	opts.nsid = nsid;
 	opts.lfsr_seed = o->lfsr_seed;
 	opts.batch_size = o->batch_size;
+	opts.sq_batch_size = o->sq_batch_size;
+	opts.cq_batch_size = o->cq_batch_size;
+	if (opts.sq_batch_size)
+		opts.batch_size = opts.sq_batch_size;
 	opts.memory_mode = o->memory_mode;
+	opts.precompute_prps = o->precompute_prps;
 	opts.verify_mode = o->verify_lfsr ? FIO_ROCM_XIO_VERIFY_LFSR :
 					   FIO_ROCM_XIO_VERIFY_NONE;
 	opts.ring_depth = td->o.iodepth;
 	opts.gpu_id = o->gpu_id;
 	opts.use_pci_mmio_bridge = o->pci_mmio_bridge;
 	opts.verbose = o->verbose;
+	opts.profile = o->profile;
 
 	if (fio_rocm_xio_open_session(&opts, &data->ctx) < 0 || !data->ctx) {
 		log_err("rocm_xio: failed to initialize rocm-xio context\n");
@@ -535,6 +605,64 @@ static int fio_rocm_xio_init(struct thread_data *td)
 	return 0;
 }
 
+static double fio_rocm_xio_cycles_to_us(const struct fio_rocm_xio_phase_stats *s,
+					uint64_t cycles)
+{
+	if (!s->gpu_clock_khz)
+		return 0.0;
+
+	return (double) cycles * 1000.0 / (double) s->gpu_clock_khz;
+}
+
+static double fio_rocm_xio_avg_us(const struct fio_rocm_xio_phase_stats *s,
+				  uint64_t cycles, uint64_t count)
+{
+	if (!count)
+		return 0.0;
+
+	return fio_rocm_xio_cycles_to_us(s, cycles) / (double) count;
+}
+
+static void fio_rocm_xio_log_phase_stats(struct thread_data *td)
+{
+	struct rocm_xio_data *data = td->io_ops_data;
+	struct rocm_xio_options *o = td->eo;
+	struct fio_rocm_xio_phase_stats s = { 0 };
+
+	if (!data || !data->ctx || !o->profile)
+		return;
+	if (fio_rocm_xio_get_phase_stats(data->ctx, &s))
+		return;
+
+	log_info("rocm_xio profile[%s]: ios=%llu batches=%llu submitted=%llu completed=%llu errors=%llu timeouts=%llu gpu_clock_khz=%u\n",
+		 td->o.name,
+		 (unsigned long long) s.io_count,
+		 (unsigned long long) s.batch_count,
+		 (unsigned long long) s.submitted_count,
+		 (unsigned long long) s.completed_count,
+		 (unsigned long long) s.error_count,
+		 (unsigned long long) s.timeout_count,
+		 s.gpu_clock_khz);
+	log_info("rocm_xio profile[%s]: avg_us/io desc=%.3f prp=%.3f sqe=%.3f sqwrite=%.3f cqpoll=%.3f verify=%.3f publish=%.3f\n",
+		 td->o.name,
+		 fio_rocm_xio_avg_us(&s, s.desc_load, s.io_count),
+		 fio_rocm_xio_avg_us(&s, s.prp_build, s.io_count),
+		 fio_rocm_xio_avg_us(&s, s.sqe_build, s.io_count),
+		 fio_rocm_xio_avg_us(&s, s.sqe_write, s.io_count),
+		 fio_rocm_xio_avg_us(&s, s.cq_poll, s.io_count),
+		 fio_rocm_xio_avg_us(&s, s.verify, s.io_count),
+		 fio_rocm_xio_avg_us(&s, s.completion_publish, s.io_count));
+	log_info("rocm_xio profile[%s]: avg_us/batch fence=%.3f sqdb=%.3f cqdb=%.3f idle_total_us=%.3f max_batch=%llu avg_polls/io=%.3f max_polls=%llu\n",
+		 td->o.name,
+		 fio_rocm_xio_avg_us(&s, s.sq_fence, s.batch_count),
+		 fio_rocm_xio_avg_us(&s, s.sq_doorbell, s.batch_count),
+		 fio_rocm_xio_avg_us(&s, s.cq_doorbell, s.batch_count),
+		 fio_rocm_xio_cycles_to_us(&s, s.idle_wait),
+		 (unsigned long long) s.max_batch,
+		 s.io_count ? (double) s.poll_iterations / (double) s.io_count : 0.0,
+		 (unsigned long long) s.max_polls);
+}
+
 static void fio_rocm_xio_cleanup(struct thread_data *td)
 {
 	struct rocm_xio_data *data = td->io_ops_data;
@@ -542,6 +670,7 @@ static void fio_rocm_xio_cleanup(struct thread_data *td)
 	if (!data)
 		return;
 
+	fio_rocm_xio_log_phase_stats(td);
 	fio_rocm_xio_close_session(data->ctx);
 	free(data->queued);
 	free(data->queued_bytes);

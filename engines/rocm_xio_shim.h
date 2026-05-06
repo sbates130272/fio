@@ -28,12 +28,16 @@ struct fio_rocm_xio_session_opts {
 	unsigned int nsid;
 	unsigned int lfsr_seed;
 	unsigned int batch_size;
+	unsigned int sq_batch_size;
+	unsigned int cq_batch_size;
 	unsigned int memory_mode;
 	unsigned int verify_mode;
+	int precompute_prps;
 	unsigned int ring_depth;
 	int gpu_id;
 	int use_pci_mmio_bridge;
 	int verbose;
+	int profile;
 };
 
 struct fio_rocm_xio_io_desc {
@@ -60,6 +64,30 @@ struct fio_rocm_xio_namespace_info {
 	unsigned int lba_size;
 };
 
+struct fio_rocm_xio_phase_stats {
+	uint64_t idle_wait;
+	uint64_t desc_load;
+	uint64_t prp_build;
+	uint64_t sqe_build;
+	uint64_t sqe_write;
+	uint64_t sq_fence;
+	uint64_t sq_doorbell;
+	uint64_t cq_poll;
+	uint64_t verify;
+	uint64_t cq_doorbell;
+	uint64_t completion_publish;
+	uint64_t io_count;
+	uint64_t batch_count;
+	uint64_t submitted_count;
+	uint64_t completed_count;
+	uint64_t poll_iterations;
+	uint64_t timeout_count;
+	uint64_t error_count;
+	uint64_t max_batch;
+	uint64_t max_polls;
+	uint32_t gpu_clock_khz;
+};
+
 struct fio_rocm_xio_session;
 
 int fio_rocm_xio_open_session(const struct fio_rocm_xio_session_opts *opts,
@@ -67,6 +95,9 @@ int fio_rocm_xio_open_session(const struct fio_rocm_xio_session_opts *opts,
 void fio_rocm_xio_close_session(struct fio_rocm_xio_session *session);
 int fio_rocm_xio_get_namespace_info(struct fio_rocm_xio_session *session,
 				    struct fio_rocm_xio_namespace_info *info);
+int fio_rocm_xio_get_phase_stats(struct fio_rocm_xio_session *session,
+				 struct fio_rocm_xio_phase_stats *stats);
+int fio_rocm_xio_reset_phase_stats(struct fio_rocm_xio_session *session);
 int fio_rocm_xio_submit_desc(struct fio_rocm_xio_session *session,
 			     const struct fio_rocm_xio_io_desc *desc);
 int fio_rocm_xio_post_desc(struct fio_rocm_xio_session *session,
