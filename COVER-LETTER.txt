@@ -1,0 +1,58 @@
+NOTE: This file is for internal review only and must be removed (or
+converted into the `git send-email` cover letter) before the series is
+posted to fio@vger.kernel.org.
+
+--------------------------------------------------------------------------
+
+[PATCH 0/N] engines: add ROCm hipFile engine via a shared gpuaccel layer
+
+This series generalizes the NVIDIA-specific libcufile engine into a
+reusable GPU-accelerator framework (gpuaccel) and adds a new libhipfile
+engine for AMD ROCm hardware on top of it.
+
+The cuFile engine already contained two distinct concerns: the generic
+"copy between GPU memory and storage, optionally via a bounce buffer"
+orchestration, and the CUDA/cuFile-specific calls that implement it. The
+hipFile API mirrors cuFile closely enough that the orchestration can be
+shared verbatim. Rather than copy-paste the engine, this series extracts
+the shared logic behind a small backend vtable (struct gpuaccel_backend)
+and reimplements libcufile against it as an identity transform, then adds
+libhipfile as a second backend.
+
+Structure:
+
+  1. Extract all CUDA calls from the engine interface into wrappers.
+  2. Add a backend function table for the wrappers.
+  3. Rename the non-specialized code from libcufile_* to gpuaccel_*.
+  4. Move the gpuaccel core into a new engines/gpuaccel.c / gpuaccel.h.
+  5. Add per-backend sync_after_* flags (hipFile needs extra stream
+     synchronize calls that cuFile does not).
+  6. Add the libhipfile engine implementing the gpuaccel backend.
+  7. Add libhipfile direct-io and posix example job files.
+  8. Move the static running/initialized state into the backend struct so
+     cuFile and hipFile can coexist in one process.
+
+Steps 1-5 and 8 are intended to be no-functional-change for libcufile;
+the cuFile behavior is preserved until and after the vtable is introduced.
+
+Build:
+  ./configure --enable-libhipfile
+  (ROCM_PATH defaults to /opt/rocm; override via the environment.)
+
+Both engines are built into the fio binary; libhipfile follows the same
+in-tree model as libcufile rather than being a dynamic external engine, so
+the gpuaccel symbols it depends on resolve at link time. configure carries
+the full ROCm include/lib/rpath flags so the Makefile stanza stays minimal
+and the two build paths do not disagree.
+
+Documentation (HOWTO.rst, fio.1) and example jobs are included.
+
+Tested on <ROCm version / GPU model / filesystem> with read, write,
+randread, randwrite and md5 verify jobs in both hipfile and posix modes.
+
+Open questions for reviewers:
+
+  - sync_after_verify_read_copy fires on all POSIX-mode reads, not only
+    verify reads; the name is narrower than the behavior. Worth renaming?
+  - Should the cuFile refactor (steps 1-5, 8) be posted as its own
+    no-op series ahead of the new engine to ease review?

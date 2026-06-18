@@ -123,12 +123,7 @@ ifdef CONFIG_LIBCUFILE
   SHARED_GPUACCEL_SOURCE = 1
 endif
 ifdef CONFIG_LIBHIPFILE
-  ROCM_PATH ?= /opt/rocm
-  hipfile_SRCS = engines/libhipfile.c
-  hipfile_CFLAGS += -I${ROCM_PATH}/include
-  LDFLAGS += -L${ROCM_PATH}/lib -Wl,-rpath,${ROCM_PATH}/lib
-  hipfile_LIBS = -lamdhip64 -lhipfile
-  ENGINES += hipfile
+  SOURCE += engines/libhipfile.c
   SHARED_GPUACCEL_SOURCE = 1
 endif
 ifdef SHARED_GPUACCEL_SOURCE

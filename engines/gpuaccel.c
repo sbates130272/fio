@@ -2,7 +2,7 @@
  * License: GPLv2, see COPYING.
  *
  * gpuaccel engine
- * 
+ *
  * Abstract engine for GPU-accelerated I/O engines. See libcufile.c for
  * an example implementation.
  */
@@ -400,7 +400,7 @@ int fio_gpuaccel_close_file(struct thread_data *td, struct fio_file *f)
 {
 	void *handle = FILE_ENG_DATA(f);
 	int rc;
-    struct gpuaccel_options *o = td->eo;
+	struct gpuaccel_options *o = td->eo;
 	const struct gpuaccel_backend *be = o->backend;
 
 	if (handle != NULL) {

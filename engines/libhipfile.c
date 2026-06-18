@@ -2,9 +2,9 @@
  * mailto: hipfile-maintainer@amd.com
  *
  * License: GPLv2, see COPYING.
- * 
+ *
  * libhipfile engine
- * 
+ *
  * FIO gpuaccel engine implementation for AMD ROCm hipfile API.
  */
 
@@ -20,7 +20,7 @@
 #include "gpuaccel.h"
 
 struct libhipfile_file_data {
-    hipFileDescr_t hf_descr;
+	hipFileDescr_t hf_descr;
 	hipFileHandle_t hf_handle;
 };
 
@@ -215,7 +215,7 @@ static pthread_mutex_t running_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static const struct gpuaccel_backend libhipfile_backend = {
 	.name = "hipfile",
-    .sync_after_posix_write_copy = 1,
+	.sync_after_posix_write_copy = 1,
 	.sync_after_verify_read_copy = 1,
 	.sync_after_memset = 1,
 	.running = &running,
