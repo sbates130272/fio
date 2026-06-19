@@ -32,3 +32,6 @@ doc/output
 /t/zbd/test-zbd-support.log.*
 /t/fuzz/fuzz_parseini
 tsc-rate
+.venv/
+.vscode/
+

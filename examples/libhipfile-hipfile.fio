@@ -20,6 +20,8 @@ size=1m
 numjobs=16
 # hipMalloc fails if too many processes attach to the GPU, use threads.
 thread
+# group_reporting to merge all thread results
+group_reporting=1
 
 [read]
 rw=read
